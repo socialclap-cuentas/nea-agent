@@ -107,6 +107,15 @@ class OpenAiLlm:
                 if tools:
                     kwargs["tools"] = tools
                     kwargs["tool_choice"] = "auto"
+                    # Los modelos "reasoning" (familia gpt-5.x: sol/terra/luna,
+                    # y o1/o3/o4) rechazan tool-calling en /v1/chat/completions
+                    # salvo que se desactive el razonamiento explícitamente.
+                    # Los modelos clásicos (gpt-4o-mini, gpt-4.1-mini, etc.)
+                    # hacen lo contrario: RECHAZAN el parámetro si se lo mandás
+                    # ("unsupported_parameter"). Por eso es condicional a la
+                    # familia del modelo, nunca incondicional.
+                    if self._model.startswith(("gpt-5", "o1", "o3", "o4")):
+                        kwargs["reasoning_effort"] = "none"
                 resp = await self._client.chat.completions.create(
                     model=self._model, messages=messages, **kwargs
                 )
