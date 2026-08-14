@@ -46,6 +46,15 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                         "description": "agendo | dio_diy | handoff | sin_respuesta",
                     },
                     "notas": {"type": "string"},
+                    "etapa": {
+                        "type": "string",
+                        "description": (
+                            "Mueve al lead en el pipeline del CRM. Usar solo el "
+                            "nombre EXACTO de una de estas etapas: 'Nuevo', "
+                            "'En conversación', 'Interesado', 'Cliente', 'Perdido'. "
+                            "Omitir si no corresponde mover nada en este turno."
+                        ),
+                    },
                 },
             },
         },
@@ -201,10 +210,11 @@ class ToolRuntime:
 
     async def _update_ficha(self, args: dict[str, Any]) -> dict[str, Any]:
         # Tolera el drift del LLM: manda lo que haya, el CRM normaliza flojo.
-        ficha = {k: v for k, v in args.items() if v is not None}
-        if not ficha:
+        etapa = args.get("etapa")
+        ficha = {k: v for k, v in args.items() if v is not None and k != "etapa"}
+        if not ficha and not etapa:
             return {"ok": True, "nota": "sin campos nuevos"}
-        await self._ctx.crm.put_ficha(self._crm_conv_id, ficha)
+        await self._ctx.crm.put_ficha(self._crm_conv_id, ficha, stage=etapa)
         return {"ok": True}
 
     async def _propose_slots(self) -> dict[str, Any]:

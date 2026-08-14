@@ -4,7 +4,7 @@ Endpoints:
   GET  /api/bot/profile                               → agent profile + KB (404 = sin perfil)
   GET  /api/bot/context?waIdentity=...
   POST /api/bot/messages   {conversationId, text}   → 409 ai_paused|window_closed
-  PUT  /api/bot/ficha      {conversationId, ficha}
+  PUT  /api/bot/ficha      {conversationId, ficha, stage?}       → stage mueve el pipeline
   POST /api/bot/handoff    {conversationId, reason}
   GET  /api/bot/availability?limit=6
   POST /api/bot/bookings   {conversationId, startUtc} → 409 slot_taken + slots frescos
@@ -126,12 +126,15 @@ class CrmClient:
         return data
 
     async def put_ficha(
-        self, conversation_id: str, ficha: dict[str, Any]
+        self, conversation_id: str, ficha: dict[str, Any], stage: str | None = None
     ) -> dict[str, Any]:
+        body: dict[str, Any] = {"conversationId": conversation_id, "ficha": ficha}
+        if stage:
+            body["stage"] = stage
         resp = await self._request(
             "PUT",
             "/api/bot/ficha",
-            json={"conversationId": conversation_id, "ficha": ficha},
+            json=body,
         )
         if resp.status_code != 200:
             raise CrmError(f"ficha devolvió {resp.status_code}")
