@@ -7,7 +7,7 @@ Endpoints:
   PUT  /api/bot/ficha      {conversationId, ficha, stage?}       → stage mueve el pipeline
   POST /api/bot/handoff    {conversationId, reason}
   GET  /api/bot/availability?limit=6
-  POST /api/bot/bookings   {conversationId, startUtc} → 409 slot_taken + slots frescos
+  POST /api/bot/bookings   {conversationId, startUtc, withVideo}  → 409 slot_taken + slots frescos
   GET  /api/bot/media/{mediaId}                       → binario + content-type
   POST /api/bot/reset      {conversationId}           → reinicio de pruebas (002)
 """
@@ -163,12 +163,16 @@ class CrmClient:
         return list(slots)
 
     async def create_booking(
-        self, conversation_id: str, start_utc: str
+        self, conversation_id: str, start_utc: str, con_videollamada: bool = False
     ) -> dict[str, Any]:
         resp = await self._request(
             "POST",
             "/api/bot/bookings",
-            json={"conversationId": conversation_id, "startUtc": start_utc},
+            json={
+                "conversationId": conversation_id,
+                "startUtc": start_utc,
+                "withVideo": con_videollamada,
+            },
         )
         if resp.status_code == 409:
             payload: dict[str, Any] = {}

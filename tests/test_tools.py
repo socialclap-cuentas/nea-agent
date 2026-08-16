@@ -73,7 +73,11 @@ async def test_book_acepta_slot_ofrecido_epoch_exacto(runtime_y_ctx, respx_mock)
     assert result["ok"] is True
     assert runtime.booked is True
     body = json.loads(bookings.calls[0].request.content)
-    assert body == {"conversationId": CRM_CONV_ID, "startUtc": SLOT_ISO}
+    assert body == {
+        "conversationId": CRM_CONV_ID,
+        "startUtc": SLOT_ISO,
+        "withVideo": False,
+    }
     # al reservar se limpian los ofrecidos
     assert await ctx.store.get_offered_slots(conv.id) == []
 

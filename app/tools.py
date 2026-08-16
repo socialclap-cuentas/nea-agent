@@ -86,7 +86,16 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "start_utc": {
                         "type": "string",
                         "description": "ISO 8601 UTC del slot elegido, tal cual se ofreció",
-                    }
+                    },
+                    "con_videollamada": {
+                        "type": "boolean",
+                        "description": (
+                            "true si el lead prefiere videollamada (se genera "
+                            "un link de Google Meet), false si prefiere llamada "
+                            "de audio o no lo aclaró. Preguntá su preferencia "
+                            "antes de reservar."
+                        ),
+                    },
                 },
                 "required": ["start_utc"],
             },
@@ -261,7 +270,9 @@ class ToolRuntime:
             }
         try:
             result = await self._ctx.crm.create_booking(
-                self._crm_conv_id, _iso_z(chosen.start_utc)
+                self._crm_conv_id,
+                _iso_z(chosen.start_utc),
+                con_videollamada=bool(args.get("con_videollamada", False)),
             )
         except SlotTaken as exc:
             # El slot se ocupó entre oferta y elección: alternativas frescas.
