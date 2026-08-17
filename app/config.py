@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     # LLM
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
+    # Modelo de emergencia: si el principal (openai_model) agota reintentos,
+    # se prueba UNA vez más con este antes de rendirse y activar el handoff.
+    # Vacío = sin respaldo (comportamiento anterior). gpt-4o-mini es buena
+    # opción de respaldo: estable, sin parámetros especiales, distinto
+    # proveedor de fallas que los modelos "reasoning" (gpt-5.x).
+    openai_fallback_model: str = "gpt-4o-mini"
     openai_transcribe_model: str = "whisper-1"  # notas de voz → texto
     history_window: int = 10
 

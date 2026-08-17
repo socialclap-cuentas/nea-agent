@@ -58,6 +58,7 @@ class OpenAiLlm:
         model: str,
         transcribe_model: str = "whisper-1",
         base_url: str | None = None,
+        fallback_model: str | None = None,
     ) -> None:
         # base_url ≠ None → proveedor OpenAI-compatible (p. ej. OpenRouter,
         # para el bench de modelos del 002). Ojo: la transcripción de audio
@@ -65,6 +66,13 @@ class OpenAiLlm:
         # (LlmExhausted → fallback), por eso el bench alterno cubre texto.
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._model = model
+        # Modelo de emergencia: si el principal agota reintentos (falla de
+        # API, respuesta vacía, deprecación no vista a tiempo), se intenta
+        # UNA vez más acá antes de rendirse y activar el handoff. Evita el
+        # silencio total cuando el modelo principal tiene un problema
+        # puntual — a costa, temporalmente, de una respuesta con un modelo
+        # distinto (avisado en el log para poder revisar después).
+        self._fallback_model = fallback_model
         self._transcribe_model = transcribe_model
         # Contadores de uso (para el bench de costos del 002): tokens reales
         # reportados por el proveedor, acumulados por instancia.
@@ -100,6 +108,27 @@ class OpenAiLlm:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
     ) -> LlmReply:
+        try:
+            return await self._complete_with(self._model, messages, tools)
+        except LlmExhausted as primary_error:
+            if not self._fallback_model or self._fallback_model == self._model:
+                raise
+            logger.warning(
+                "llm: %s agotado, probando respaldo %s", self._model, self._fallback_model
+            )
+            try:
+                return await self._complete_with(self._fallback_model, messages, tools)
+            except LlmExhausted:
+                # Si el respaldo también falla, se reporta el error del
+                # modelo principal (es el que hay que revisar primero).
+                raise primary_error
+
+    async def _complete_with(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+    ) -> LlmReply:
         last_error: Exception | None = None
         for attempt in range(self.RETRIES + 1):
             try:
@@ -114,10 +143,10 @@ class OpenAiLlm:
                     # hacen lo contrario: RECHAZAN el parámetro si se lo mandás
                     # ("unsupported_parameter"). Por eso es condicional a la
                     # familia del modelo, nunca incondicional.
-                    if self._model.startswith(("gpt-5", "o1", "o3", "o4")):
+                    if model.startswith(("gpt-5", "o1", "o3", "o4")):
                         kwargs["reasoning_effort"] = "none"
                 resp = await self._client.chat.completions.create(
-                    model=self._model, messages=messages, **kwargs
+                    model=model, messages=messages, **kwargs
                 )
                 u = getattr(resp, "usage", None)
                 if u is not None:
@@ -138,16 +167,16 @@ class OpenAiLlm:
                 refusal = getattr(message, "refusal", None) if message else None
                 finish_reason = getattr(choice, "finish_reason", None) if choice else None
                 last_error = ValueError(
-                    f"respuesta vacía del LLM (sin content ni tools) "
+                    f"respuesta vacía del LLM ({model}, sin content ni tools) "
                     f"finish_reason={finish_reason!r} refusal={refusal!r}"
                 )
                 logger.warning(
-                    "llm: respuesta vacía, intento %d — finish_reason=%s refusal=%s",
-                    attempt + 1, finish_reason, refusal,
+                    "llm: respuesta vacía (%s), intento %d — finish_reason=%s refusal=%s",
+                    model, attempt + 1, finish_reason, refusal,
                 )
             except Exception as exc:  # red, API, parseo — todo reintenta
                 last_error = exc
-                logger.warning("llm: fallo en intento %d: %s", attempt + 1, exc)
+                logger.warning("llm: fallo en intento %d (%s): %s", attempt + 1, model, exc)
             if attempt < self.RETRIES:
                 await asyncio.sleep(2**attempt)  # 1 s, 2 s
         raise LlmExhausted(str(last_error))
