@@ -41,6 +41,20 @@ def verify_signature(body: bytes, header: str | None, secret: str | None) -> boo
     return hmac.compare_digest(header[len("sha256="):].lower(), expected)
 
 
+def verify_signature_any(body: bytes, header: str | None, secrets: list[str]) -> bool:
+    """Acepta si la firma matchea CUALQUIERA de los secrets configurados.
+
+    Necesario porque Instagram (app "Vocero CRM-IG") firma con un app secret
+    propio, distinto del de la app principal que usan WhatsApp/Messenger.
+    Sin secrets configurados (lista vacía tras filtrar vacíos) → no se exige
+    firma (dev).
+    """
+    active = [s for s in secrets if s]
+    if not active:
+        return True
+    return any(verify_signature(body, header, s) for s in active)
+
+
 def _extract_text(msg: dict[str, Any]) -> str | None:
     """Texto útil del mensaje; None si es multimedia u otro tipo."""
     mtype = msg.get("type")
@@ -222,7 +236,8 @@ async def receive(request: Request) -> Any:
     ctx: AppContext = request.app.state.ctx
     body = await request.body()
     signature = request.headers.get("x-hub-signature-256")
-    if not verify_signature(body, signature, ctx.settings.meta_app_secret or None):
+    secrets = [ctx.settings.meta_app_secret, ctx.settings.instagram_app_secret]
+    if not verify_signature_any(body, signature, secrets):
         logger.warning("firma inválida o ausente en el webhook — 401")
         return JSONResponse({"error": "firma inválida"}, status_code=401)
 
