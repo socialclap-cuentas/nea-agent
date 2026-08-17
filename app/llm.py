@@ -129,8 +129,22 @@ class OpenAiLlm:
                 reply = self._parse(resp)
                 if reply.content or reply.tool_calls:
                     return reply
-                last_error = ValueError("respuesta vacía del LLM (sin content ni tools)")
-                logger.warning("llm: respuesta vacía, intento %d", attempt + 1)
+                # Antes esto solo decía "vacía" sin explicar por qué — ahora
+                # capturamos refusal (el modelo se negó, ej. filtro de
+                # seguridad) y finish_reason (ej. "length" = se cortó por
+                # límite de tokens) para diagnosticar la causa real.
+                choice = (getattr(resp, "choices", None) or [None])[0]
+                message = getattr(choice, "message", None) if choice else None
+                refusal = getattr(message, "refusal", None) if message else None
+                finish_reason = getattr(choice, "finish_reason", None) if choice else None
+                last_error = ValueError(
+                    f"respuesta vacía del LLM (sin content ni tools) "
+                    f"finish_reason={finish_reason!r} refusal={refusal!r}"
+                )
+                logger.warning(
+                    "llm: respuesta vacía, intento %d — finish_reason=%s refusal=%s",
+                    attempt + 1, finish_reason, refusal,
+                )
             except Exception as exc:  # red, API, parseo — todo reintenta
                 last_error = exc
                 logger.warning("llm: fallo en intento %d: %s", attempt + 1, exc)
