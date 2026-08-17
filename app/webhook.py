@@ -157,6 +157,51 @@ def extract_inbound(payload: dict[str, Any]) -> list[InboundMessage]:
     return out
 
 
+def extract_inbound_messenger(payload: dict[str, Any]) -> list[InboundMessage]:
+    """Parseo de payloads de Instagram/Messenger (formato entry[].messaging[]).
+
+    Distinto del formato de WhatsApp Business (entry[].changes[].value.messages[]).
+    object: "page" = Messenger, object: "instagram" = Instagram DM.
+    """
+    object_type = payload.get("object")
+    channel = "instagram" if object_type == "instagram" else "messenger"
+    out: list[InboundMessage] = []
+    for entry in payload.get("entry") or []:
+        for event in (entry or {}).get("messaging") or []:
+            if not isinstance(event, dict):
+                continue
+            sender = (event.get("sender") or {}).get("id")
+            if not sender:
+                logger.warning("evento de %s sin sender.id — descartado", channel)
+                continue
+            message = event.get("message") or {}
+            if message.get("is_echo"):
+                # Eco de un mensaje que el propio negocio mandó — no abre turno.
+                continue
+            postback = event.get("postback") or {}
+            text = message.get("text") or postback.get("title")
+            wa_message_id = message.get("mid")
+            attachments = message.get("attachments") or []
+            media_id = None
+            media_mime = None
+            if attachments and isinstance(attachments[0], dict):
+                att = attachments[0]
+                media_id = ((att.get("payload") or {}).get("url"))
+                media_mime = att.get("type")
+            out.append(
+                InboundMessage(
+                    wa_message_id=str(wa_message_id) if wa_message_id else None,
+                    identity=str(sender),
+                    type="text" if text else "unsupported",
+                    channel=channel,
+                    text=str(text) if text else None,
+                    media_id=media_id,
+                    media_mime=media_mime,
+                )
+            )
+    return out
+
+
 @router.get("/webhook")
 async def verify(request: Request) -> PlainTextResponse:
     """Verificación de suscripción de Meta (hub.challenge)."""
@@ -210,7 +255,11 @@ async def _process(ctx: AppContext, body: bytes, signature: str | None) -> None:
         except Exception:
             logger.exception("captura de payload falló — sigo")
     try:
-        inbound = extract_inbound(payload)
+        object_type = payload.get("object")
+        if object_type in ("instagram", "page"):
+            inbound = extract_inbound_messenger(payload)
+        else:
+            inbound = extract_inbound(payload)
     except Exception:
         logger.exception("parseo del payload falló — solo relay")
         return
