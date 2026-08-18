@@ -172,20 +172,40 @@ def extract_inbound(payload: dict[str, Any]) -> list[InboundMessage]:
 
 
 def _events_from_messenger_payload(entry: dict[str, Any]) -> list[dict[str, Any]]:
-    """Messenger e Instagram (object=page|instagram): entry[].messaging[] —
-    cada item ya es el evento. Confirmado en vivo con payload real de
-    Instagram (2026-08-18): usa "messaging", NO "changes" — a diferencia de
-    lo que sugería la doc genérica de Meta sobre "fields" por default."""
+    """Messenger (object=page): entry[].messaging[] — cada item ya es el evento."""
     return [e for e in (entry.get("messaging") or []) if isinstance(e, dict)]
 
 
+def _events_from_instagram_payload(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """Instagram (object=instagram): Meta usa DOS sobres distintos, confirmado
+    en vivo el 2026-08-18 —
+    - Mensajes nuevos ("messages" field): entry[].changes[] con
+      field="messages", evento en change.value (sender/recipient/message).
+      Confirmado con el botón "Test" oficial de Meta en el dashboard.
+    - Eventos especiales (message_edit, read, etc.): entry[].messaging[],
+      igual que Messenger. Confirmado con un DM real editado en vivo.
+    Se combinan los dos; message_edit/read se descartan más abajo.
+    """
+    events: list[dict[str, Any]] = []
+    for change in entry.get("changes") or []:
+        if not isinstance(change, dict):
+            continue
+        if change.get("field") != "messages":
+            continue
+        value = change.get("value")
+        if isinstance(value, dict):
+            events.append(value)
+    events.extend(_events_from_messenger_payload(entry))
+    return events
+
+
 def extract_inbound_messenger(payload: dict[str, Any]) -> list[InboundMessage]:
-    """Parseo de payloads de Instagram/Messenger (ambos: entry[].messaging[]).
+    """Parseo de payloads de Instagram/Messenger.
 
     Distinto del formato de WhatsApp Business (entry[].changes[].value.messages[]).
-    object: "page" = Messenger, object: "instagram" = Instagram DM.
-    Eventos sin "message" (message_edit, read, etc.) se descartan solos, ya
-    que no traen msg.text ni sender siempre — se filtran más abajo.
+    - Messenger (object: "page"): entry[].messaging[]
+    - Instagram (object: "instagram"): entry[].changes[] (mensajes nuevos) +
+      entry[].messaging[] (eventos especiales) — ver _events_from_instagram_payload.
     """
     object_type = payload.get("object")
     channel = "instagram" if object_type == "instagram" else "messenger"
@@ -193,7 +213,12 @@ def extract_inbound_messenger(payload: dict[str, Any]) -> list[InboundMessage]:
     for entry in payload.get("entry") or []:
         if not isinstance(entry, dict):
             continue
-        for event in _events_from_messenger_payload(entry):
+        events = (
+            _events_from_instagram_payload(entry)
+            if channel == "instagram"
+            else _events_from_messenger_payload(entry)
+        )
+        for event in events:
             if "message_edit" in event or "read" in event:
                 continue  # no son mensajes nuevos
             sender = (event.get("sender") or {}).get("id")
