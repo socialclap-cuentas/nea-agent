@@ -171,19 +171,46 @@ def extract_inbound(payload: dict[str, Any]) -> list[InboundMessage]:
     return out
 
 
+def _events_from_messenger_payload(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """Messenger (object=page): entry[].messaging[] — cada item ya es el evento."""
+    return [e for e in (entry.get("messaging") or []) if isinstance(e, dict)]
+
+
+def _events_from_instagram_payload(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """Instagram (object=instagram): entry[].changes[] con field=messages y el
+    evento adentro de "value" (sender/recipient/message) — NO usa "messaging"."""
+    events: list[dict[str, Any]] = []
+    for change in entry.get("changes") or []:
+        if not isinstance(change, dict):
+            continue
+        if change.get("field") not in ("messages", "messaging_postbacks", "messaging_referral"):
+            continue
+        value = change.get("value")
+        if isinstance(value, dict):
+            events.append(value)
+    return events
+
+
 def extract_inbound_messenger(payload: dict[str, Any]) -> list[InboundMessage]:
-    """Parseo de payloads de Instagram/Messenger (formato entry[].messaging[]).
+    """Parseo de payloads de Instagram/Messenger.
 
     Distinto del formato de WhatsApp Business (entry[].changes[].value.messages[]).
-    object: "page" = Messenger, object: "instagram" = Instagram DM.
+    - Messenger (object: "page"): entry[].messaging[]
+    - Instagram (object: "instagram"): entry[].changes[] con field="messages",
+      el evento va en cada "value" (mismo shape que un item de "messaging").
     """
     object_type = payload.get("object")
     channel = "instagram" if object_type == "instagram" else "messenger"
     out: list[InboundMessage] = []
     for entry in payload.get("entry") or []:
-        for event in (entry or {}).get("messaging") or []:
-            if not isinstance(event, dict):
-                continue
+        if not isinstance(entry, dict):
+            continue
+        events = (
+            _events_from_instagram_payload(entry)
+            if channel == "instagram"
+            else _events_from_messenger_payload(entry)
+        )
+        for event in events:
             sender = (event.get("sender") or {}).get("id")
             if not sender:
                 logger.warning("evento de %s sin sender.id — descartado", channel)
