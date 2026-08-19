@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # Perfil del negocio (capa de persona; ver app/profile.py)
     agent_name: str = "Nea"  # se usa si el CRM no define nombre
     agent_timezone: str = "America/Mexico_City"  # IANA; fechas del prompt
+    # Ventana horaria (hora local del agente) para mandar el seguimiento
+    # automático — evita que caiga de madrugada/noche y moleste al lead.
+    followup_window_start_hour: int = 9
+    followup_window_end_hour: int = 21
     brief_path: str = ""  # markdown local, fallback si el CRM no tiene perfil
 
     # LLM
