@@ -37,6 +37,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                         "description": "dueno | hijo_del_dueno | empleado | otro",
                     },
                     "tamano_aprox": {"type": "string"},
+                    "volumen_mensajes_dia": {
+                        "type": "string",
+                        "description": "Cuántos mensajes/consultas recibe por día aprox., tal como lo diga el lead (ej. '20 a 50', 'unos 10').",
+                    },
                     "sistemas": {"type": "string"},
                     "dolor_principal": {"type": "string"},
                     "geo": {"type": "string"},
