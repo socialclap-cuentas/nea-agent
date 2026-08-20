@@ -39,6 +39,15 @@ class FollowupWorker:
     async def tick(self, now: datetime | None = None) -> None:
         now = now or utcnow()
         for conv in await self._ctx.store.due_followups(now):
+            if not self._within_window(now):
+                # Fuera del horario permitido: se salta sin reclamar — el
+                # registro sigue "debido" y se reintenta en el próximo tick
+                # (cada 60s) hasta que la hora local entre en la ventana.
+                logger.info(
+                    "followup %s: fuera de la ventana horaria — reintenta luego",
+                    conv.wa_identity,
+                )
+                continue
             # Claim atómico ANTES de enviar: jamás un segundo empujón.
             if not await self._ctx.store.claim_followup(conv.id):
                 continue
@@ -49,6 +58,13 @@ class FollowupWorker:
                     "followup de %s falló — queda consumido (a lo sumo uno)",
                     conv.wa_identity,
                 )
+
+    def _within_window(self, now: datetime) -> bool:
+        settings = self._ctx.settings
+        local_hour = now.astimezone(_agent_tz(settings)).hour
+        start = settings.followup_window_start_hour
+        end = settings.followup_window_end_hour
+        return start <= local_hour < end
 
     async def _push(self, conv: Conversation) -> None:
         ctx = self._ctx

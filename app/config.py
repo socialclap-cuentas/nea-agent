@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     # Webhook de Meta
     verify_token: str = ""
     meta_app_secret: str = ""  # vacío = no se verifica la firma (dev)
+    # Secret PROPIO de la app de Instagram (Instagram business login), distinto
+    # del meta_app_secret de la app principal — Meta firma cada canal con el
+    # secret de su propia app. Vacío = solo se acepta meta_app_secret.
+    instagram_app_secret: str = ""
 
     # CRM (vocero-crm, bot gateway /api/bot/*)
     crm_base_url: str = "http://localhost:3000"
@@ -39,6 +43,10 @@ class Settings(BaseSettings):
     # Perfil del negocio (capa de persona; ver app/profile.py)
     agent_name: str = "Nea"  # se usa si el CRM no define nombre
     agent_timezone: str = "America/Mexico_City"  # IANA; fechas del prompt
+    # Ventana horaria (hora local del agente) para mandar el seguimiento
+    # automático — evita que caiga de madrugada/noche y moleste al lead.
+    followup_window_start_hour: int = 9
+    followup_window_end_hour: int = 21
     brief_path: str = ""  # markdown local, fallback si el CRM no tiene perfil
 
     # LLM

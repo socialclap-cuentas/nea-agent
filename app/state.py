@@ -90,6 +90,7 @@ class InboundMessage:
     wa_message_id: str | None
     identity: str
     type: str
+    channel: str = "whatsapp"  # whatsapp | instagram | messenger
     text: str | None = None
     referral_headline: str | None = None
     profile_name: str | None = None

@@ -41,6 +41,20 @@ def verify_signature(body: bytes, header: str | None, secret: str | None) -> boo
     return hmac.compare_digest(header[len("sha256="):].lower(), expected)
 
 
+def verify_signature_any(body: bytes, header: str | None, secrets: list[str]) -> bool:
+    """Acepta si la firma matchea CUALQUIERA de los secrets configurados.
+
+    Necesario porque Instagram (app "Vocero CRM-IG") firma con un app secret
+    propio, distinto del de la app principal que usan WhatsApp/Messenger.
+    Sin secrets configurados (lista vacía tras filtrar vacíos) → no se exige
+    firma (dev).
+    """
+    active = [s for s in secrets if s]
+    if not active:
+        return True
+    return any(verify_signature(body, header, s) for s in active)
+
+
 def _extract_text(msg: dict[str, Any]) -> str | None:
     """Texto útil del mensaje; None si es multimedia u otro tipo."""
     mtype = msg.get("type")
@@ -157,6 +171,88 @@ def extract_inbound(payload: dict[str, Any]) -> list[InboundMessage]:
     return out
 
 
+def _events_from_messenger_payload(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """Messenger (object=page): entry[].messaging[] — cada item ya es el evento."""
+    return [e for e in (entry.get("messaging") or []) if isinstance(e, dict)]
+
+
+def _events_from_instagram_payload(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """Instagram (object=instagram): Meta usa DOS sobres distintos, confirmado
+    en vivo el 2026-08-18 —
+    - Mensajes nuevos ("messages" field): entry[].changes[] con
+      field="messages", evento en change.value (sender/recipient/message).
+      Confirmado con el botón "Test" oficial de Meta en el dashboard.
+    - Eventos especiales (message_edit, read, etc.): entry[].messaging[],
+      igual que Messenger. Confirmado con un DM real editado en vivo.
+    Se combinan los dos; message_edit/read se descartan más abajo.
+    """
+    events: list[dict[str, Any]] = []
+    for change in entry.get("changes") or []:
+        if not isinstance(change, dict):
+            continue
+        if change.get("field") != "messages":
+            continue
+        value = change.get("value")
+        if isinstance(value, dict):
+            events.append(value)
+    events.extend(_events_from_messenger_payload(entry))
+    return events
+
+
+def extract_inbound_messenger(payload: dict[str, Any]) -> list[InboundMessage]:
+    """Parseo de payloads de Instagram/Messenger.
+
+    Distinto del formato de WhatsApp Business (entry[].changes[].value.messages[]).
+    - Messenger (object: "page"): entry[].messaging[]
+    - Instagram (object: "instagram"): entry[].changes[] (mensajes nuevos) +
+      entry[].messaging[] (eventos especiales) — ver _events_from_instagram_payload.
+    """
+    object_type = payload.get("object")
+    channel = "instagram" if object_type == "instagram" else "messenger"
+    out: list[InboundMessage] = []
+    for entry in payload.get("entry") or []:
+        if not isinstance(entry, dict):
+            continue
+        events = (
+            _events_from_instagram_payload(entry)
+            if channel == "instagram"
+            else _events_from_messenger_payload(entry)
+        )
+        for event in events:
+            if "message_edit" in event or "read" in event:
+                continue  # no son mensajes nuevos
+            sender = (event.get("sender") or {}).get("id")
+            if not sender:
+                logger.warning("evento de %s sin sender.id — descartado", channel)
+                continue
+            message = event.get("message") or {}
+            if message.get("is_echo"):
+                # Eco de un mensaje que el propio negocio mandó — no abre turno.
+                continue
+            postback = event.get("postback") or {}
+            text = message.get("text") or postback.get("title")
+            wa_message_id = message.get("mid")
+            attachments = message.get("attachments") or []
+            media_id = None
+            media_mime = None
+            if attachments and isinstance(attachments[0], dict):
+                att = attachments[0]
+                media_id = ((att.get("payload") or {}).get("url"))
+                media_mime = att.get("type")
+            out.append(
+                InboundMessage(
+                    wa_message_id=str(wa_message_id) if wa_message_id else None,
+                    identity=str(sender),
+                    type="text" if text else "unsupported",
+                    channel=channel,
+                    text=str(text) if text else None,
+                    media_id=media_id,
+                    media_mime=media_mime,
+                )
+            )
+    return out
+
+
 @router.get("/webhook")
 async def verify(request: Request) -> PlainTextResponse:
     """Verificación de suscripción de Meta (hub.challenge)."""
@@ -177,7 +273,8 @@ async def receive(request: Request) -> Any:
     ctx: AppContext = request.app.state.ctx
     body = await request.body()
     signature = request.headers.get("x-hub-signature-256")
-    if not verify_signature(body, signature, ctx.settings.meta_app_secret or None):
+    secrets = [ctx.settings.meta_app_secret, ctx.settings.instagram_app_secret]
+    if not verify_signature_any(body, signature, secrets):
         logger.warning("firma inválida o ausente en el webhook — 401")
         return JSONResponse({"error": "firma inválida"}, status_code=401)
 
@@ -210,7 +307,11 @@ async def _process(ctx: AppContext, body: bytes, signature: str | None) -> None:
         except Exception:
             logger.exception("captura de payload falló — sigo")
     try:
-        inbound = extract_inbound(payload)
+        object_type = payload.get("object")
+        if object_type in ("instagram", "page"):
+            inbound = extract_inbound_messenger(payload)
+        else:
+            inbound = extract_inbound(payload)
     except Exception:
         logger.exception("parseo del payload falló — solo relay")
         return
