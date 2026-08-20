@@ -1,13 +1,14 @@
 """Seguimiento: UN empujón y solo uno, marcado ANTES de enviar."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 import httpx
 
 from app.followup import FollowupWorker
 from app.llm import LlmReply
 from app.state import utcnow
+from app.turn import _agent_tz
 from tests.conftest import (
     CRM_CONV_ID,
     CRM_URL,
@@ -15,6 +16,14 @@ from tests.conftest import (
     crm_context,
     make_ctx,
 )
+
+
+def hora_habil(ctx):
+    """now real, forzado a las 15:00 en la tz del negocio — dentro de la
+    ventana horaria (9-21hs) sin depender de a qué hora corren los tests."""
+    tz = _agent_tz(ctx.settings)
+    local = utcnow().astimezone(tz).replace(hour=15, minute=0, second=0, microsecond=0)
+    return local.astimezone(timezone.utc)
 
 
 async def preparar_conversacion(ctx, hace_horas: float = 5.0):
@@ -42,7 +51,7 @@ async def test_followup_un_solo_empujon(respx_mock):
     )
     worker = FollowupWorker(ctx)
 
-    await worker.tick()
+    await worker.tick(hora_habil(ctx))
     assert messages.call_count == 1
     assert ctx.store.conversations[conv.id].followup_sent is True
 
@@ -50,8 +59,8 @@ async def test_followup_un_solo_empujon(respx_mock):
     await ctx.store.update_conversation(
         conv.id, followup_due_at=utcnow() - timedelta(minutes=1)
     )
-    await worker.tick()
-    await worker.tick()
+    await worker.tick(hora_habil(ctx))
+    await worker.tick(hora_habil(ctx))
     assert messages.call_count == 1
     await ctx.crm.aclose()
 
@@ -66,11 +75,11 @@ async def test_followup_ventana_cerrada_se_omite_y_consume(respx_mock):
         return_value=httpx.Response(200, json={"messageId": "m1"})
     )
     worker = FollowupWorker(ctx)
-    await worker.tick()
+    await worker.tick(hora_habil(ctx))
     assert messages.call_count == 0  # omitido con log
     # el claim ocurrió ANTES del envío: aunque "crashee" después, a lo sumo uno
     assert ctx.store.conversations[conv.id].followup_sent is True
-    await worker.tick()
+    await worker.tick(hora_habil(ctx))
     assert messages.call_count == 0
     await ctx.crm.aclose()
 
@@ -102,7 +111,7 @@ async def test_followup_llm_caido_se_omite_sin_reintento_futuro(respx_mock):
         return_value=httpx.Response(200, json={"messageId": "m1"})
     )
     worker = FollowupWorker(ctx)
-    await worker.tick()
+    await worker.tick(hora_habil(ctx))
     assert messages.call_count == 0
     assert ctx.store.conversations[conv.id].followup_sent is True  # consumido
     await ctx.crm.aclose()
