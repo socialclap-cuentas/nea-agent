@@ -65,6 +65,15 @@ async def run_turn(
 
     conv = await ctx.store.get_or_create_conversation(identity)
 
+    # Atribución de campaña (Click-to-WhatsApp): se guarda solo la primera vez
+    # que aparece (Meta la manda en el primer mensaje tras clickear el ad).
+    ctwa_clid = next(
+        (m.referral_ctwa_clid for m in inbound if m.referral_ctwa_clid), None
+    )
+    if ctwa_clid and not conv.ctwa_clid:
+        await ctx.store.update_conversation(conv.id, ctwa_clid=ctwa_clid)
+        conv.ctwa_clid = ctwa_clid
+
     # --- Comando /reset (líneas de prueba) --------------------------------
     # Corre ANTES de los gates de aiEnabled/ventana: un reset también debe
     # sacar la conversación de un handoff activo.

@@ -148,7 +148,9 @@ def extract_inbound(payload: dict[str, Any]) -> list[InboundMessage]:
                             ).get("first_name")
                             if name:
                                 contact_names.append(str(name))
-                referral = (msg.get("referral") or {}).get("headline")
+                referral_obj = msg.get("referral") or {}
+                referral = referral_obj.get("headline")
+                ctwa_clid = referral_obj.get("ctwa_clid")
                 out.append(
                     InboundMessage(
                         wa_message_id=msg.get("id"),
@@ -156,6 +158,7 @@ def extract_inbound(payload: dict[str, Any]) -> list[InboundMessage]:
                         type=mtype,
                         text=_extract_text(msg),
                         referral_headline=str(referral) if referral else None,
+                        referral_ctwa_clid=str(ctwa_clid) if ctwa_clid else None,
                         profile_name=str(profile_name) if profile_name else None,
                         media_id=str(media["id"]) if media.get("id") else None,
                         media_mime=media.get("mime_type"),

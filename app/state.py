@@ -28,6 +28,7 @@ class Conversation:
     id: int
     wa_identity: str
     crm_conversation_id: str | None = None
+    ctwa_clid: str | None = None  # atribución de campaña (Click-to-WhatsApp)
     phase: str = "descubrimiento"  # descubrimiento|insight|salida|agendando|cerrada
     greeted: bool = False
     media_notice_sent: bool = False
@@ -93,6 +94,7 @@ class InboundMessage:
     channel: str = "whatsapp"  # whatsapp | instagram | messenger
     text: str | None = None
     referral_headline: str | None = None
+    referral_ctwa_clid: str | None = None  # atribución de campaña (Meta Ads)
     profile_name: str | None = None
     # Multimedia (spec 002): lo mínimo para procesar el contenido.
     media_id: str | None = None

@@ -18,6 +18,7 @@ logger = logging.getLogger("nea.db")
 _CONV_COLUMNS = frozenset(
     {
         "crm_conversation_id",
+        "ctwa_clid",
         "phase",
         "greeted",
         "media_notice_sent",
@@ -33,6 +34,7 @@ def _conv_from_row(row: asyncpg.Record) -> Conversation:
         id=row["id"],
         wa_identity=row["wa_identity"],
         crm_conversation_id=row["crm_conversation_id"],
+        ctwa_clid=row["ctwa_clid"],
         phase=row["phase"],
         greeted=row["greeted"],
         media_notice_sent=row["media_notice_sent"],
