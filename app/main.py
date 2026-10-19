@@ -24,6 +24,7 @@ from app.crm import CrmClient
 from app.db import PgStore
 from app.followup import FollowupWorker
 from app.llm import OpenAiLlm
+from app.privacy import router as privacy_router
 from app.profile import ProfileProvider
 from app.relay import RelayWorker
 from app.sender import SenderWorker
@@ -123,6 +124,7 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
         _wire_coalescer(ctx)
     app.include_router(webhook_router)
     app.include_router(admin_router)
+    app.include_router(privacy_router)
 
     @app.get("/health")
     async def health(request: Request):  # type: ignore[no-untyped-def]

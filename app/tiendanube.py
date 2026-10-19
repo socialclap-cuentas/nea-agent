@@ -24,6 +24,11 @@ logger = logging.getLogger("nea.tiendanube")
 
 API_BASE = "https://api.tiendanube.com/v1"
 PRODUCT_FIELDS = "id,name,description,canonical_url,variants,free_shipping,tags"
+ORDER_FIELDS = (
+    "id,number,status,payment_status,shipping_status,shipping_option,"
+    "shipping_tracking_number,shipping_tracking_url,created_at,"
+    "contact_phone,contact_email,products"
+)
 CACHE_TTL_SECONDS = 60.0
 MAX_RESULTS = 6
 DESCRIPTION_CHARS = 350
@@ -118,6 +123,34 @@ def normalize_product(raw: dict[str, Any], *, detail: bool = False) -> dict[str,
     return out
 
 
+def normalize_order(raw: dict[str, Any]) -> dict[str, Any]:
+    """Pedido compacto para el LLM. Sin dirección, nombre, email ni teléfono.
+
+    `_phone` / `_email` viajan SOLO para verificar identidad en tools.py, que los
+    quita antes de entregarle algo al LLM.
+    """
+    tracking = str(raw.get("shipping_tracking_number") or "").strip()
+    tracking_url = str(raw.get("shipping_tracking_url") or "").strip()
+    out: dict[str, Any] = {
+        "numero_pedido": raw.get("number"),
+        "estado": raw.get("status"),
+        "pago": raw.get("payment_status"),
+        "envio_estado": raw.get("shipping_status"),
+        "metodo_envio": _plain(raw.get("shipping_option")) or None,
+        "fecha": str(raw.get("created_at") or "")[:10] or None,
+        "productos": [
+            {"nombre": _plain(p.get("name")), "cantidad": p.get("quantity")}
+            for p in (raw.get("products") or [])
+            if isinstance(p, dict)
+        ],
+        "numero_seguimiento": tracking or None,
+        "link_seguimiento": tracking_url or None,
+        "_phone": str(raw.get("contact_phone") or ""),
+        "_email": str(raw.get("contact_email") or ""),
+    }
+    return out
+
+
 class TiendanubeClient:
     def __init__(
         self,
@@ -201,3 +234,16 @@ class TiendanubeClient:
         if not isinstance(data, dict):
             return None
         return normalize_product(data, detail=True)
+
+    async def find_order(self, number: int) -> dict[str, Any] | None:
+        """Pedido por número visible (el que ve el cliente), o None si no existe."""
+        data = await self._get(
+            "/orders",
+            {"q": number, "per_page": 10, "fields": ORDER_FIELDS},
+        )
+        if not isinstance(data, list):
+            return None
+        for raw in data:
+            if isinstance(raw, dict) and str(raw.get("number")) == str(number):
+                return normalize_order(raw)
+        return None

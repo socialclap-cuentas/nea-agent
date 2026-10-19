@@ -186,7 +186,9 @@ def test_tool_schemas_por_modo():
     assert {"propose_slots", "book_session"} <= base
     assert "buscar_productos" not in base  # default intacto
     ventas = _names(tool_schemas(make_settings(agent_mode="ventas")))
-    assert ventas == {"update_ficha", "handoff", "buscar_productos", "ver_producto"}
+    assert ventas == {
+        "update_ficha", "handoff", "buscar_productos", "ver_producto", "buscar_pedido",
+    }
 
 
 def test_prompt_ventas_vs_agendamiento():

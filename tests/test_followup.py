@@ -23,7 +23,10 @@ def hora_habil(ctx):
     ventana horaria (9-21hs) sin depender de a qué hora corren los tests."""
     tz = _agent_tz(ctx.settings)
     local = utcnow().astimezone(tz).replace(hour=15, minute=0, second=0, microsecond=0)
-    return local.astimezone(timezone.utc)
+    result = local.astimezone(timezone.utc)
+    if result < utcnow():  # las 15:00 de hoy ya pasaron: usar las de mañana
+        result += timedelta(days=1)
+    return result
 
 
 async def preparar_conversacion(ctx, hace_horas: float = 5.0):

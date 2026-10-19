@@ -189,6 +189,36 @@ CATALOG_TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
 ]
 
+ORDER_TOOL_SCHEMAS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "buscar_pedido",
+            "description": (
+                "Consulta el estado de un pedido y su número de seguimiento a partir "
+                "del NÚMERO DE PEDIDO que le llegó al cliente (el de la confirmación "
+                "de compra). Solo responde si el pedido pertenece a esta persona; si "
+                "devuelve 'no_verificado', pedile el email con el que compró y "
+                "reintentá pasándolo en 'email'. No inventes estados ni fechas."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "numero_pedido": {
+                        "type": "integer",
+                        "description": "Número de pedido (3 dígitos o más)",
+                    },
+                    "email": {
+                        "type": "string",
+                        "description": "Email de la compra, solo si hizo falta verificar",
+                    },
+                },
+                "required": ["numero_pedido"],
+            },
+        },
+    },
+]
+
 _VENTAS_FROM_BASE = ("update_ficha", "handoff")
 
 
@@ -219,7 +249,7 @@ def tool_schemas(settings: Any, *, catalog: bool = False) -> list[dict[str, Any]
                             "impresión). Omitir si ninguna aplica."
                         ),
                     }
-        return base + CATALOG_TOOL_SCHEMAS
+        return base + CATALOG_TOOL_SCHEMAS + ORDER_TOOL_SCHEMAS
     return TOOL_SCHEMAS + (CATALOG_TOOL_SCHEMAS if catalog else [])
 
 
@@ -262,6 +292,22 @@ def _slots_for_llm(slots: list[OfferedSlot]) -> list[dict[str, str]]:
     return [{"start_utc": _iso_z(s.start_utc), "label": s.label} for s in slots]
 
 
+def _digits(value: str) -> str:
+    return "".join(ch for ch in value if ch.isdigit())
+
+
+def _order_belongs(pedido: dict[str, Any], wa_identity: str, email: str) -> bool:
+    """El pedido es de quien escribe: coincide el celular (últimos 8 dígitos) o
+    el email de la compra. Sin coincidencia no se revela NADA del pedido."""
+    wa = _digits(wa_identity)
+    phone = _digits(str(pedido.get("_phone") or ""))
+    if len(wa) >= 8 and len(phone) >= 8 and wa[-8:] == phone[-8:]:
+        return True
+    given = email.strip().lower()
+    stored = str(pedido.get("_email") or "").strip().lower()
+    return bool(given) and bool(stored) and given == stored
+
+
 class ToolRuntime:
     """Ejecuta las tool-calls de UN turno y acumula sus efectos."""
 
@@ -299,6 +345,8 @@ class ToolRuntime:
                 return await self._buscar_productos(args)
             if name == "ver_producto":
                 return await self._ver_producto(args)
+            if name == "buscar_pedido":
+                return await self._buscar_pedido(args)
             logger.warning("tools: herramienta desconocida %r", name)
             return {"ok": False, "error": f"herramienta desconocida: {name}"}
         except CrmError as exc:
@@ -356,6 +404,48 @@ class ToolRuntime:
         if producto is None:
             return {"ok": False, "error": "producto_no_encontrado"}
         return {"ok": True, "producto": producto}
+
+    async def _buscar_pedido(self, args: dict[str, Any]) -> dict[str, Any]:
+        client = self._ctx.tiendanube
+        if client is None:
+            return {"ok": False, "error": "pedidos_no_disponibles"}
+        try:
+            numero = int(args.get("numero_pedido"))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "numero_pedido_invalido"}
+        if numero < 100:
+            return {"ok": False, "error": "numero_pedido_invalido"}
+        try:
+            pedido = await client.find_order(numero)
+        except TiendanubeError as exc:
+            logger.warning("tools: buscar_pedido falló: %s", exc)
+            return {
+                "ok": False,
+                "error": "pedidos_no_disponibles",
+                "detalle": "no pude consultar pedidos ahora; no inventes datos: derivá a una persona (etapa Seguimiento de pedido)",
+            }
+        # Mismo mensaje exista o no el pedido: no se filtra qué números existen.
+        no_verificado = {
+            "ok": False,
+            "error": "no_verificado",
+            "detalle": (
+                "no pude confirmar un pedido a nombre de esta persona. Pedile el "
+                "email de la compra y reintentá; si tampoco coincide, derivá a una "
+                "persona (etapa Seguimiento de pedido). No des ningún dato del pedido."
+            ),
+        }
+        if pedido is None:
+            return no_verificado
+        if not _order_belongs(
+            pedido, self._conv.wa_identity, str(args.get("email") or "")
+        ):
+            return no_verificado
+        public = {k: v for k, v in pedido.items() if not k.startswith("_")}
+        if not public.get("numero_seguimiento"):
+            public["nota"] = (
+                "todavía no tiene número de seguimiento cargado; no prometas fechas"
+            )
+        return {"ok": True, "pedido": public}
 
     async def _update_ficha(self, args: dict[str, Any]) -> dict[str, Any]:
         # Tolera el drift del LLM: manda lo que haya, el CRM normaliza flojo.
