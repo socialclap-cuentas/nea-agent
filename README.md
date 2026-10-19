@@ -131,3 +131,15 @@ opciones con link y deriva a una persona (handoff) en presupuestos, volumen,
 personalización, descuentos, envíos y reclamos. No agenda citas en este modo.
 Los NUNCA del chasis (inventar, hostilidad, off-topic, datos sensibles) son los
 mismos; se suma "jamás afirmar stock sin consultarlo".
+
+## Pausa, panel `/admin` y derivación a etapas
+
+- **Panel** `https://<bot>/admin` (usuario `admin`, contraseña `ADMIN_TOKEN`):
+  pausar/reactivar el agente y vaciar la cola de respuestas atrasadas. Pausado,
+  Nea no responde, no manda seguimientos ni reintenta envíos; los mensajes
+  siguen llegando a la Bandeja del CRM. `AGENT_PAUSED=true` es el freno duro.
+- **Respuestas viejas** (`PENDING_SEND_MAX_AGE_MINUTES`, 20 por defecto): lo que
+  no pudo entregarse a tiempo se descarta en vez de salir tarde.
+- **Derivar con etapa**: en modo ventas, `handoff` acepta `etapa` (una de
+  `HANDOFF_STAGES`); Nea mueve al cliente a esa etapa del pipeline y recién
+  después pasa la conversación a una persona.

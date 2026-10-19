@@ -13,7 +13,7 @@ import httpx
 from app import turn
 from app.sender import SenderWorker
 from app.state import utcnow
-from tests.conftest import CRM_CONV_ID, CRM_URL, IDENTITY, make_ctx
+from tests.conftest import CRM_CONV_ID, CRM_URL, IDENTITY, make_ctx, make_settings
 
 
 async def _sin_esperas(monkeypatch):
@@ -120,7 +120,8 @@ async def test_sender_abandona_por_409_sin_handoff(respx_mock):
 
 
 async def test_sender_agota_24h_abandona_y_alerta(respx_mock):
-    ctx = make_ctx()
+    # Con el vencimiento corto apagado (0), rige el tope duro de 24 h + handoff.
+    ctx = make_ctx(make_settings(pending_send_max_age_minutes=0))
     conv = await ctx.store.get_or_create_conversation(IDENTITY)
     pid = await ctx.store.enqueue_pending_send(conv.id, CRM_CONV_ID, "texto")
     ctx.store.pending_sends[pid].created_at = utcnow() - timedelta(hours=25)

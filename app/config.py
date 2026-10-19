@@ -78,6 +78,20 @@ class Settings(BaseSettings):
     # "Escribiendo…" casi inmediato al recibir un mensaje (antes del coalesce).
     typing_delay_seconds: float = 0.5
 
+    # Pausa y operación
+    # Interruptor duro por entorno: true = el bot NO responde (ni seguimientos
+    # ni reintentos), pase lo que pase en el panel. El panel /admin maneja la
+    # pausa día a día; esto es el freno de emergencia a nivel despliegue.
+    agent_paused: bool = False
+    # Contraseña del panel /admin (usuario "admin"). Vacío = panel deshabilitado.
+    admin_token: str = ""
+    # Una respuesta que no pudo entregarse en este tiempo se DESCARTA (ya está
+    # vieja: el cliente probablemente siguió escribiendo). 0 = nunca vence.
+    pending_send_max_age_minutes: int = 20
+    # Etapas del pipeline del CRM a las que el agente puede mover un lead al
+    # derivarlo a una persona (CSV; nombres EXACTOS, deben existir en el CRM).
+    handoff_stages: str = "Reclamo,Seguimiento de pedido,Presupuesto"
+
     # Infra
     database_url: str = ""
     port: int = 8000
@@ -85,6 +99,10 @@ class Settings(BaseSettings):
     # Desarrollo: loguear el JSON crudo de mensajes no-texto entrantes para
     # capturar los formatos reales de Meta (spec 002). Apagar al terminar.
     capture_payloads: bool = False
+
+    @property
+    def handoff_stage_names(self) -> list[str]:
+        return [p.strip() for p in self.handoff_stages.split(",") if p.strip()]
 
     @property
     def allowed_identities(self) -> frozenset[str]:

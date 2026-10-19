@@ -170,6 +170,10 @@ class Store(Protocol):
         """Marca followup_sent=True atómicamente. True si ESTA llamada lo ganó."""
         ...
 
+    async def get_flag(self, key: str) -> str | None: ...
+    async def set_flag(self, key: str, value: str) -> None: ...
+    async def abandon_all_pending_sends(self) -> int: ...
+
     async def ping(self) -> None: ...
     async def aclose(self) -> None: ...
 
@@ -189,6 +193,21 @@ class MemoryStore:
         self.messages: list[BotMessage] = []
         self.offered: dict[int, list[OfferedSlot]] = {}
         self.pending_sends: dict[int, PendingSend] = {}
+        self.flags: dict[str, str] = {}
+
+    async def get_flag(self, key: str) -> str | None:
+        return self.flags.get(key)
+
+    async def set_flag(self, key: str, value: str) -> None:
+        self.flags[key] = value
+
+    async def abandon_all_pending_sends(self) -> int:
+        n = 0
+        for item in self.pending_sends.values():
+            if item.delivered_at is None and item.abandoned_at is None:
+                item.abandoned_at = utcnow()
+                n += 1
+        return n
 
     async def mark_processed(self, wa_message_id: str) -> bool:
         if wa_message_id in self.processed:
@@ -354,5 +373,6 @@ class AppContext:
     llm: Any  # OpenAiLlm o fake con .complete()
     profile: Any | None = None  # ProfileProvider; None en tests = perfil mínimo
     tiendanube: Any | None = None  # TiendanubeClient; None = sin catálogo
+    pause_cache: dict[str, Any] = field(default_factory=dict)  # control.is_paused
     coalescer: Any | None = None
     relay_wake: asyncio.Event = field(default_factory=asyncio.Event)

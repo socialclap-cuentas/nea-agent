@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from app import media
 from app.config import canonical_identity
+from app.control import is_paused
 from app.crm import CrmConflict, CrmError
 from app.hostility import ALERT as HOSTILITY_ALERT, hostile_streak
 from app.llm import LlmExhausted
@@ -54,6 +55,13 @@ async def run_turn(
     ctx: AppContext, identity: str, inbound: list[InboundMessage]
 ) -> None:
     settings = ctx.settings
+
+    # --- Gate 0: pausa global (panel /admin o AGENT_PAUSED) ----------------
+    # El relay al CRM ya ocurrió en el webhook: la persona queda visible en la
+    # Bandeja; solo se calla el agente.
+    if await is_paused(ctx):
+        logger.info("pausa global activa: %s sin respuesta del agente", identity)
+        return
 
     # --- Gate 1: allowlist de pruebas (Constitución V) --------------------
     allowed = settings.allowed_identities
@@ -199,6 +207,19 @@ async def run_turn(
     # El handoff se ejecuta DESPUÉS de la despedida (si no, el CRM la rechaza
     # con 409 ai_paused).
     if runtime.handoff_reason is not None:
+        if runtime.handoff_stage:
+            # Mueve al lead a la etapa pedida ANTES de pausar la IA. Best-effort:
+            # si la etapa no existe en el CRM, el pase a humano sigue igual.
+            try:
+                await ctx.crm.put_ficha(
+                    str(crm_conv_id), {}, stage=runtime.handoff_stage
+                )
+            except CrmError as exc:
+                logger.warning(
+                    "handoff: no pude mover a la etapa %r (%s) — sigo",
+                    runtime.handoff_stage,
+                    exc,
+                )
         await _safe_handoff(ctx, str(crm_conv_id), runtime.handoff_reason)
 
     # --- Fase + seguimiento -----------------------------------------------

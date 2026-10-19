@@ -12,6 +12,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from app.control import is_paused
 from app.crm import CrmConflict, CrmError
 from app.llm import LlmExhausted
 from app.profile import resolve_profile
@@ -42,6 +43,8 @@ class FollowupWorker:
 
     async def tick(self, now: datetime | None = None) -> None:
         now = now or utcnow()
+        if await is_paused(self._ctx):
+            return  # pausa global: ni un empujón sale; sigue "debido" para después
         for conv in await self._ctx.store.due_followups(now):
             if not self._within_window(now):
                 # Fuera del horario permitido: se salta sin reclamar — el

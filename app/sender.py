@@ -13,6 +13,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 
+from app.control import is_paused
 from app.crm import CrmConflict, CrmError
 from app.state import AppContext, PendingSend, utcnow
 
@@ -38,7 +39,20 @@ class SenderWorker:
 
     async def tick(self, now: datetime | None = None) -> None:
         now = now or utcnow()
+        if await is_paused(self._ctx):
+            return  # en pausa nada sale; lo viejo vence solo (ver abajo)
+        stale_min = self._ctx.settings.pending_send_max_age_minutes
         for item in await self._ctx.store.due_pending_sends(now):
+            if stale_min and now - item.created_at > timedelta(minutes=stale_min):
+                # Respuesta vieja: el cliente siguió escribiendo o se fue. Mandarla
+                # ahora confunde más de lo que ayuda (incidente 2026-10-19: ráfaga
+                # de saludos atrasados). Se descarta; sin handoff para no pausar
+                # una conversación por una respuesta que ya no corresponde.
+                logger.warning(
+                    "sender: pending %d con más de %d min — descartado", item.id, stale_min
+                )
+                await self._ctx.store.mark_pending_send_abandoned(item.id)
+                continue
             if now - item.created_at > self.MAX_AGE:
                 logger.error(
                     "sender: pending %d agotó las 24 h sin entregar — abandonado + handoff",

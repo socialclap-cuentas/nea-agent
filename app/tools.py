@@ -7,6 +7,7 @@ turno.
 """
 from __future__ import annotations
 
+import copy
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -198,7 +199,26 @@ def tool_schemas(settings: Any, *, catalog: bool = False) -> list[dict[str, Any]
     - ventas: ficha + handoff + catálogo; sin agenda ni route_out.
     """
     if getattr(settings, "agent_mode", "agendamiento") == "ventas":
-        base = [t for t in TOOL_SCHEMAS if t["function"]["name"] in _VENTAS_FROM_BASE]
+        base = [
+            copy.deepcopy(t)
+            for t in TOOL_SCHEMAS
+            if t["function"]["name"] in _VENTAS_FROM_BASE
+        ]
+        stages = list(getattr(settings, "handoff_stage_names", []) or [])
+        if stages:
+            for t in base:
+                if t["function"]["name"] == "handoff":
+                    t["function"]["parameters"]["properties"]["etapa"] = {
+                        "type": "string",
+                        "enum": stages,
+                        "description": (
+                            "Etapa del pipeline a la que mover al cliente al derivarlo, "
+                            "si corresponde: Reclamo (algo llegó mal, roto o incompleto), "
+                            "Seguimiento de pedido (pregunta por su envío/número de "
+                            "seguimiento), Presupuesto (cotización especial, volumen, "
+                            "impresión). Omitir si ninguna aplica."
+                        ),
+                    }
         return base + CATALOG_TOOL_SCHEMAS
     return TOOL_SCHEMAS + (CATALOG_TOOL_SCHEMAS if catalog else [])
 
@@ -258,6 +278,7 @@ class ToolRuntime:
         self._profile = profile or BusinessProfile()
         # Efectos observables por turn.py:
         self.handoff_reason: str | None = None  # se ejecuta DESPUÉS de la despedida
+        self.handoff_stage: str | None = None  # etapa del pipeline a asignar al derivar
         self.booked = False
         self.routed_out = False
         self.proposed = False
@@ -437,6 +458,10 @@ class ToolRuntime:
 
     def _handoff(self, args: dict[str, Any]) -> dict[str, Any]:
         self.handoff_reason = str(args.get("reason") or "lead_request")
+        etapa = str(args.get("etapa") or "").strip()
+        # Solo etapas autorizadas por configuración: el LLM no inventa etapas.
+        if etapa and etapa in self._ctx.settings.handoff_stage_names:
+            self.handoff_stage = etapa
         return {
             "ok": True,
             "nota": (

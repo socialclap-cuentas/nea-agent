@@ -324,6 +324,26 @@ class PgStore:
             "UPDATE pending_send SET abandoned_at = now() WHERE id = $1", pending_id
         )
 
+    async def abandon_all_pending_sends(self) -> int:
+        status = await self.pool.execute(
+            "UPDATE pending_send SET abandoned_at = now() "
+            "WHERE delivered_at IS NULL AND abandoned_at IS NULL"
+        )
+        return int(status.split()[-1])  # "UPDATE n"
+
+    async def get_flag(self, key: str) -> str | None:
+        return await self.pool.fetchval("SELECT value FROM bot_flag WHERE key = $1", key)
+
+    async def set_flag(self, key: str, value: str) -> None:
+        await self.pool.execute(
+            """
+            INSERT INTO bot_flag (key, value) VALUES ($1, $2)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+            """,
+            key,
+            value,
+        )
+
     async def reschedule_pending_send(
         self, pending_id: int, attempts: int, next_retry_at: datetime
     ) -> None:

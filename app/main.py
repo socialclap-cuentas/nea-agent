@@ -18,6 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.coalesce import Coalescer
+from app.admin import router as admin_router
 from app.config import Settings
 from app.crm import CrmClient
 from app.db import PgStore
@@ -121,6 +122,7 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
     if ctx is not None:
         _wire_coalescer(ctx)
     app.include_router(webhook_router)
+    app.include_router(admin_router)
 
     @app.get("/health")
     async def health(request: Request):  # type: ignore[no-untyped-def]
