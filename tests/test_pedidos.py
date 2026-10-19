@@ -93,6 +93,24 @@ async def test_pedido_verificado_por_email(client, respx_mock):
     await ctx.crm.aclose()
 
 
+async def test_muestra_otros_pedidos_del_mismo_email(client, respx_mock):
+    otro = dict(
+        ORDER, number=1500, payment_status="paid", shipping_status="shipped",
+        created_at="2026-10-18T10:00:00+0000",
+    )
+    ajeno = dict(ORDER, number=1600, contact_email="otro@mail.com")
+    respx_mock.get(f"{BASE}/orders").mock(
+        return_value=httpx.Response(200, json=[ORDER, otro, ajeno])
+    )
+    runtime, ctx = await _runtime(client)
+    res = await runtime.execute("buscar_pedido", {"numero_pedido": 1234})
+    nums = [o["numero_pedido"] for o in res["otros_pedidos_de_esta_persona"]]
+    assert nums == [1500]  # ni el mismo pedido ni el de otra persona
+    assert "productos" not in res["otros_pedidos_de_esta_persona"][0]
+    assert "Clienta@Mail.com" not in str(res)
+    await ctx.crm.aclose()
+
+
 async def test_pedido_inexistente_y_numero_invalido(client, respx_mock):
     respx_mock.get(f"{BASE}/orders").mock(return_value=httpx.Response(404))
     runtime, ctx = await _runtime(client)

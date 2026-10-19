@@ -445,7 +445,26 @@ class ToolRuntime:
             public["nota"] = (
                 "todavía no tiene número de seguimiento cargado; no prometas fechas"
             )
-        return {"ok": True, "pedido": public}
+        out: dict[str, Any] = {"ok": True, "pedido": public}
+        # Si la clienta tiene más pedidos con el mismo email, que los vea: puede
+        # estar preguntando por otro (p. ej. este quedó sin pagar y otro sí).
+        try:
+            otros = await client.other_orders(
+                str(pedido.get("_email") or ""), numero
+            )
+        except TiendanubeError as exc:  # best-effort: el pedido principal ya está
+            logger.warning("tools: otros pedidos no disponibles: %s", exc)
+            otros = []
+        if otros:
+            out["otros_pedidos_de_esta_persona"] = [
+                {k: v for k, v in o.items() if not k.startswith("_")} for o in otros
+            ]
+            out["instrucciones"] = (
+                "tiene más pedidos con el mismo email: mencionalos brevemente (número, "
+                "pago y envío) y preguntale por cuál consulta, sobre todo si este no "
+                "está pagado o ella dice que tiene otro"
+            )
+        return out
 
     async def _update_ficha(self, args: dict[str, Any]) -> dict[str, Any]:
         # Tolera el drift del LLM: manda lo que haya, el CRM normaliza flojo.

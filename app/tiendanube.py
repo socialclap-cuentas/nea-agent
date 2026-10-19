@@ -284,3 +284,33 @@ class TiendanubeClient:
             if isinstance(raw, dict) and str(raw.get("number")) == str(number):
                 return normalize_order(raw)
         return None
+
+    async def other_orders(
+        self, email: str, exclude_number: int, limit: int = 4
+    ) -> list[dict[str, Any]]:
+        """Otros pedidos de la misma compradora (mismo email), más nuevos primero.
+
+        Solo para quien YA fue verificada sobre un pedido; devuelve la versión
+        compacta (sin productos ni datos personales)."""
+        email = email.strip().lower()
+        if not email:
+            return []
+        data = await self._get(
+            "/orders",
+            {"q": email, "per_page": 20, "fields": ORDER_FIELDS},
+        )
+        if not isinstance(data, list):
+            return []
+        out: list[dict[str, Any]] = []
+        for raw in data:
+            if not isinstance(raw, dict):
+                continue
+            if str(raw.get("contact_email") or "").strip().lower() != email:
+                continue
+            if str(raw.get("number")) == str(exclude_number):
+                continue
+            order = normalize_order(raw)
+            order.pop("productos", None)
+            out.append(order)
+        out.sort(key=lambda o: o.get("fecha") or "", reverse=True)
+        return out[:limit]
