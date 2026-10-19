@@ -23,6 +23,7 @@ from app.profile import resolve_profile
 from app.prompt import build_system_prompt
 from app.state import AppContext, InboundMessage, utcnow
 from app.tools import ToolRuntime, tool_schemas
+from app.wa_format import to_whatsapp
 
 logger = logging.getLogger("nea.turn")
 
@@ -329,6 +330,7 @@ async def _send(ctx: AppContext, conv_id: int, crm_conv_id: str, text: str) -> b
     """Envía vía el CRM. Si el turno agota sus reintentos, la respuesta NO se
     descarta: se encola en pending_send y el SenderWorker la reintenta con
     backoff hasta entregar o agotar 24 h (incidente 2026-08-03)."""
+    text = to_whatsapp(text)
     for attempt in range(SEND_ATTEMPTS):
         try:
             await ctx.crm.send_message(crm_conv_id, text)
