@@ -42,6 +42,14 @@ async def _runtime(tn, identity=WA):
     return ToolRuntime(ctx, conv, CRM_CONV_ID), ctx
 
 
+def test_estados_en_espanol_claro():
+    out = normalize_order(dict(ORDER, payment_status="voided", shipping_status="unpacked"))
+    assert out["estado"] == "abierto"
+    assert "anulado" in out["pago"] and "open" not in str(out)
+    assert out["envio"] == "todavía sin preparar"
+    assert normalize_order(dict(ORDER, shipping_status="algo_nuevo"))["envio"] == "algo_nuevo"
+
+
 def test_normalize_order_no_expone_datos_personales():
     out = normalize_order(ORDER)
     assert out["numero_seguimiento"] == "AR123456789"

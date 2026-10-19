@@ -123,6 +123,43 @@ def normalize_product(raw: dict[str, Any], *, detail: bool = False) -> dict[str,
     return out
 
 
+_ORDER_STATUS = {"open": "abierto", "closed": "cerrado", "cancelled": "cancelado"}
+_PAYMENT_STATUS = {
+    "pending": "pago pendiente",
+    "authorized": "pago autorizado, a la espera de acreditarse",
+    "paid": "pagado",
+    "partially_paid": "pagado parcialmente",
+    "voided": "pago anulado (no se completó)",
+    "expired": "pago vencido",
+    "refunded": "reintegrado",
+    "partially_refunded": "reintegrado parcialmente",
+    "abandoned": "compra abandonada (no se completó el pago)",
+    "chargeback": "contracargo",
+}
+_SHIPPING_STATUS = {
+    "unpacked": "todavía sin preparar",
+    "unfulfilled": "todavía sin preparar",
+    "in_preparation": "en preparación",
+    "partially_packed": "en preparación",
+    "packed": "empaquetado, listo para despachar",
+    "unshipped": "todavía no despachado",
+    "ready_for_pickup": "listo para retirar",
+    "pickup_ready": "listo para retirar",
+    "shipped": "despachado, en camino",
+    "dispatched": "despachado, en camino",
+    "partially_fulfilled": "enviado parcialmente",
+    "fulfilled": "enviado",
+    "delivered": "entregado",
+    "marked_as_fulfilled": "enviado",
+}
+
+
+def _es(table: dict[str, str], value: Any) -> str | None:
+    if not value:
+        return None
+    return table.get(str(value), str(value))
+
+
 def normalize_order(raw: dict[str, Any]) -> dict[str, Any]:
     """Pedido compacto para el LLM. Sin dirección, nombre, email ni teléfono.
 
@@ -133,9 +170,9 @@ def normalize_order(raw: dict[str, Any]) -> dict[str, Any]:
     tracking_url = str(raw.get("shipping_tracking_url") or "").strip()
     out: dict[str, Any] = {
         "numero_pedido": raw.get("number"),
-        "estado": raw.get("status"),
-        "pago": raw.get("payment_status"),
-        "envio_estado": raw.get("shipping_status"),
+        "estado": _es(_ORDER_STATUS, raw.get("status")),
+        "pago": _es(_PAYMENT_STATUS, raw.get("payment_status")),
+        "envio": _es(_SHIPPING_STATUS, raw.get("shipping_status")),
         "metodo_envio": _plain(raw.get("shipping_option")) or None,
         "fecha": str(raw.get("created_at") or "")[:10] or None,
         "productos": [
