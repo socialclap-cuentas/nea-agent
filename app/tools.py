@@ -14,6 +14,7 @@ from typing import Any
 from app.crm import CrmError, SlotTaken
 from app.profile import BusinessProfile
 from app.state import AppContext, Conversation, OfferedSlot
+from app.tiendanube import TiendanubeError
 
 logger = logging.getLogger("nea.tools")
 
@@ -139,6 +140,68 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
 ]
 
+CATALOG_TOOL_SCHEMAS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "buscar_productos",
+            "description": (
+                "Busca en el catálogo REAL de la tienda (precio y stock en vivo). "
+                "Úsala SIEMPRE antes de mencionar un producto, precio, medida o "
+                "disponibilidad. Probá con palabras clave simples (ej. 'doypack', "
+                "'bolsa kraft', 'caja pizza'); si no hay resultados, reintentá con "
+                "un sinónimo antes de rendirte."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "consulta": {
+                        "type": "string",
+                        "description": "Palabras clave del producto buscado",
+                    },
+                    "max_resultados": {
+                        "type": "integer",
+                        "description": "Cuántos productos traer (1 a 6, por defecto 4)",
+                    },
+                },
+                "required": ["consulta"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ver_producto",
+            "description": (
+                "Trae el detalle completo de UN producto (todas sus variantes, "
+                "precios, stock y descripción) por su producto_id, tal como "
+                "salió de buscar_productos."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "producto_id": {"type": "string"},
+                },
+                "required": ["producto_id"],
+            },
+        },
+    },
+]
+
+_VENTAS_FROM_BASE = ("update_ficha", "handoff")
+
+
+def tool_schemas(settings: Any, *, catalog: bool = False) -> list[dict[str, Any]]:
+    """Herramientas expuestas al LLM según el modo del agente.
+
+    - agendamiento (default): las cinco originales (+ catálogo si hay cliente).
+    - ventas: ficha + handoff + catálogo; sin agenda ni route_out.
+    """
+    if getattr(settings, "agent_mode", "agendamiento") == "ventas":
+        base = [t for t in TOOL_SCHEMAS if t["function"]["name"] in _VENTAS_FROM_BASE]
+        return base + CATALOG_TOOL_SCHEMAS
+    return TOOL_SCHEMAS + (CATALOG_TOOL_SCHEMAS if catalog else [])
+
 
 def _iso_z(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -211,6 +274,10 @@ class ToolRuntime:
                 return await self._route_out()
             if name == "handoff":
                 return self._handoff(args)
+            if name == "buscar_productos":
+                return await self._buscar_productos(args)
+            if name == "ver_producto":
+                return await self._ver_producto(args)
             logger.warning("tools: herramienta desconocida %r", name)
             return {"ok": False, "error": f"herramienta desconocida: {name}"}
         except CrmError as exc:
@@ -220,6 +287,54 @@ class ToolRuntime:
                 "error": "crm_error",
                 "detalle": "no pude completar la acción; continúa la conversación o haz handoff",
             }
+
+    async def _buscar_productos(self, args: dict[str, Any]) -> dict[str, Any]:
+        client = self._ctx.tiendanube
+        if client is None:
+            return {"ok": False, "error": "catalogo_no_disponible"}
+        consulta = str(args.get("consulta") or "").strip()
+        if not consulta:
+            return {"ok": False, "error": "consulta_vacia"}
+        try:
+            limit = int(args.get("max_resultados") or 4)
+        except (TypeError, ValueError):
+            limit = 4
+        try:
+            productos = await client.search(consulta, limit)
+        except TiendanubeError as exc:
+            logger.warning("tools: buscar_productos falló: %s", exc)
+            return {
+                "ok": False,
+                "error": "catalogo_no_disponible",
+                "detalle": "no pude consultar el catálogo ahora; no inventes datos: ofrecé pasar con una persona del equipo",
+            }
+        if not productos:
+            return {
+                "ok": True,
+                "productos": [],
+                "nota": "sin resultados; probá otra palabra clave o preguntá qué necesita exactamente",
+            }
+        return {"ok": True, "productos": productos}
+
+    async def _ver_producto(self, args: dict[str, Any]) -> dict[str, Any]:
+        client = self._ctx.tiendanube
+        if client is None:
+            return {"ok": False, "error": "catalogo_no_disponible"}
+        pid = str(args.get("producto_id") or "").strip()
+        if not pid.isdigit():
+            return {"ok": False, "error": "producto_id_invalido"}
+        try:
+            producto = await client.get(pid)
+        except TiendanubeError as exc:
+            logger.warning("tools: ver_producto falló: %s", exc)
+            return {
+                "ok": False,
+                "error": "catalogo_no_disponible",
+                "detalle": "no pude consultar el catálogo ahora; no inventes datos",
+            }
+        if producto is None:
+            return {"ok": False, "error": "producto_no_encontrado"}
+        return {"ok": True, "producto": producto}
 
     async def _update_ficha(self, args: dict[str, Any]) -> dict[str, Any]:
         # Tolera el drift del LLM: manda lo que haya, el CRM normaliza flojo.

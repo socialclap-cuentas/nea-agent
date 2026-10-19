@@ -15,7 +15,11 @@ from typing import Any
 from app.crm import CrmConflict, CrmError
 from app.llm import LlmExhausted
 from app.profile import resolve_profile
-from app.prompt import FOLLOWUP_INSTRUCTION, build_system_prompt
+from app.prompt import (
+    FOLLOWUP_INSTRUCTION,
+    FOLLOWUP_INSTRUCTION_VENTAS,
+    build_system_prompt,
+)
 from app.state import AppContext, Conversation, utcnow
 from app.turn import _agent_tz
 
@@ -97,6 +101,7 @@ class FollowupWorker:
             conv=conv,
             offered=[],
             tz=_agent_tz(ctx.settings),
+            mode=ctx.settings.agent_mode,
         )
         history = await ctx.store.recent_messages(
             conv.id, ctx.settings.history_window
@@ -104,7 +109,14 @@ class FollowupWorker:
         messages: list[dict[str, Any]] = (
             [{"role": "system", "content": system}]
             + [{"role": m.role, "content": m.content} for m in history]
-            + [{"role": "system", "content": FOLLOWUP_INSTRUCTION}]
+            + [
+                {
+                    "role": "system",
+                    "content": FOLLOWUP_INSTRUCTION_VENTAS
+                    if ctx.settings.agent_mode == "ventas"
+                    else FOLLOWUP_INSTRUCTION,
+                }
+            ]
         )
         try:
             reply = await ctx.llm.complete(messages, tools=None)

@@ -21,7 +21,7 @@ from app.llm import LlmExhausted
 from app.profile import resolve_profile
 from app.prompt import build_system_prompt
 from app.state import AppContext, InboundMessage, utcnow
-from app.tools import TOOL_SCHEMAS, ToolRuntime
+from app.tools import ToolRuntime, tool_schemas
 
 logger = logging.getLogger("nea.turn")
 
@@ -148,6 +148,7 @@ async def run_turn(
         referral_headline=referral,
         offered=offered,
         tz=_agent_tz(settings),
+        mode=settings.agent_mode,
     )
     history = await ctx.store.recent_messages(conv.id, settings.history_window)
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}] + [
@@ -263,7 +264,10 @@ async def _tool_loop(
 ) -> str | None:
     """Rondas de tool-calling hasta obtener texto final (o rendirse)."""
     for _ in range(MAX_TOOL_ROUNDS):
-        reply = await ctx.llm.complete(messages, tools=TOOL_SCHEMAS)
+        reply = await ctx.llm.complete(
+            messages,
+            tools=tool_schemas(ctx.settings, catalog=ctx.tiendanube is not None),
+        )
         if not reply.tool_calls:
             return reply.content  # turno de puro texto
         # content vacío con tool_calls es normal (turno solo-herramientas)

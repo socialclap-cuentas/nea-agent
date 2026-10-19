@@ -27,6 +27,7 @@ from app.profile import ProfileProvider
 from app.relay import RelayWorker
 from app.sender import SenderWorker
 from app.state import AppContext
+from app.tiendanube import TiendanubeClient
 from app.turn import handle_flush
 from app.webhook import router as webhook_router
 
@@ -72,7 +73,22 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
                     default_name=settings.agent_name,
                     brief_path=settings.brief_path or None,
                 ),
+                tiendanube=(
+                    TiendanubeClient(
+                        settings.tiendanube_store_id,
+                        settings.tiendanube_access_token,
+                        user_agent=settings.tiendanube_user_agent,
+                    )
+                    if settings.tiendanube_store_id
+                    and settings.tiendanube_access_token
+                    else None
+                ),
             )
+            if app.state.ctx.tiendanube is None and settings.agent_mode == "ventas":
+                logger.warning(
+                    "AGENT_MODE=ventas sin TIENDANUBE_STORE_ID/ACCESS_TOKEN: "
+                    "el agente no podrá consultar el catálogo"
+                )
         c: AppContext = app.state.ctx
         _wire_coalescer(c)
 
@@ -95,6 +111,8 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
             if c.coalescer is not None:
                 await c.coalescer.aclose()
             if own_resources:
+                if c.tiendanube is not None:
+                    await c.tiendanube.aclose()
                 await c.crm.aclose()
                 await c.store.aclose()
 

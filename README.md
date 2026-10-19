@@ -121,3 +121,13 @@ que definen la personalidad:
 ## Licencia
 
 [MIT](LICENSE) — igual que Vocero. Úsalo, véndelo instalado, modifícalo.
+
+## Modo ventas con catálogo de Tiendanube
+
+`AGENT_MODE=ventas` + `TIENDANUBE_STORE_ID` + `TIENDANUBE_ACCESS_TOKEN` convierten
+a Nea en asesor de ventas: consulta precio y stock **en vivo** con
+`buscar_productos` / `ver_producto` (app/tiendanube.py), recomienda máximo 3
+opciones con link y deriva a una persona (handoff) en presupuestos, volumen,
+personalización, descuentos, envíos y reclamos. No agenda citas en este modo.
+Los NUNCA del chasis (inventar, hostilidad, off-topic, datos sensibles) son los
+mismos; se suma "jamás afirmar stock sin consultarlo".

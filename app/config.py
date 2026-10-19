@@ -49,6 +49,16 @@ class Settings(BaseSettings):
     followup_window_end_hour: int = 21
     brief_path: str = ""  # markdown local, fallback si el CRM no tiene perfil
 
+    # Modo del agente: "agendamiento" (califica y agenda citas) o "ventas"
+    # (asesora y vende con el catálogo de Tiendanube; sin agenda).
+    agent_mode: str = "agendamiento"
+
+    # Catálogo de Tiendanube (solo lectura). Ambos vacíos = sin herramientas de
+    # catálogo. Con valores, Nea consulta precio y stock EN VIVO.
+    tiendanube_store_id: str = ""
+    tiendanube_access_token: str = ""
+    tiendanube_user_agent: str = "Nea eBags (socialclap.cuentas@gmail.com)"
+
     # LLM
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
