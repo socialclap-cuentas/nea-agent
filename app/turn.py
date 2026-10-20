@@ -231,7 +231,7 @@ async def run_turn(
     else:
         if runtime.proposed:
             updates["phase"] = "agendando"
-        if sent and not conv.followup_sent:
+        if sent and not conv.followup_sent and settings.followup_hours > 0:
             updates["followup_due_at"] = utcnow() + timedelta(
                 hours=settings.followup_hours
             )

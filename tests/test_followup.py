@@ -118,3 +118,25 @@ async def test_followup_llm_caido_se_omite_sin_reintento_futuro(respx_mock):
     assert messages.call_count == 0
     assert ctx.store.conversations[conv.id].followup_sent is True  # consumido
     await ctx.crm.aclose()
+
+
+async def test_followup_convierte_markdown_a_whatsapp(respx_mock):
+    import json
+
+    ctx = make_ctx()
+    ctx.llm.replies = [
+        LlmReply(content="¿Seguimos? [Ver bolsas](https://ebags.com.ar) **gracias**")
+    ]
+    await preparar_conversacion(ctx)
+    respx_mock.get(f"{CRM_URL}/api/bot/context").mock(
+        return_value=httpx.Response(200, json=crm_context())
+    )
+    messages = respx_mock.post(f"{CRM_URL}/api/bot/messages").mock(
+        return_value=httpx.Response(200, json={"messageId": "m1"})
+    )
+    await FollowupWorker(ctx).tick(hora_habil(ctx))
+    sent = json.loads(messages.calls[0].request.content)
+    body = json.dumps(sent, ensure_ascii=False)
+    assert "](" not in body and "**" not in body
+    assert "Ver bolsas: https://ebags.com.ar" in body
+    await ctx.crm.aclose()

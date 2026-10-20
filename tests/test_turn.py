@@ -72,3 +72,22 @@ async def test_turno_con_route_out_cierra_sin_seguimiento(ctx, client, respx_moc
     conv = next(iter(ctx.store.conversations.values()))
     assert conv.phase == "cerrada"
     assert conv.followup_due_at is None
+
+
+async def test_followup_hours_cero_no_agenda_seguimiento(respx_mock):
+    import httpx
+
+    from app.main import create_app
+    from tests.conftest import make_ctx, make_settings
+
+    ctx = make_ctx(make_settings(followup_hours=0))
+    mock_crm_basics(respx_mock)
+    app = create_app(ctx=ctx)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://bot.test"
+    ) as http:
+        await http.post("/webhook", content=wa_body(text="hola"))
+        await asyncio.sleep(0.3)
+    conv = next(iter(ctx.store.conversations.values()))
+    assert conv.followup_due_at is None
+    await ctx.crm.aclose()
