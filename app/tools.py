@@ -269,6 +269,197 @@ AGENDA_V2_SCHEMAS = [
 # Herramientas que solo tienen sentido si el CRM agenda.
 AGENDA_TOOLS = frozenset({"propose_slots", "book_session", "reschedule_session"})
 
+# 070 — Vertical salud (Vocero con profesionales cargados). Estas herramientas
+# SOLO existen cuando el contexto del turno trae el bloque `salud`: un CRM sin
+# el vertical no las ve, así que el modelo no puede pedir lo que no existe.
+SALUD_SCHEMAS: list[dict[str, Any]] = [
+    {"type": "function", "function": {
+        "name": "salud_catalogo",
+        "description": (
+            "Lee el catálogo REAL del consultorio: profesionales (con los tipos "
+            "de turno y obras sociales que atiende cada uno), tipos de turno "
+            "(duración, precio, preparación, seña) y obras sociales. Úsala para "
+            "contestar «¿atienden OSDE?», «¿cuánto dura?», «¿cuánto sale?». Lo "
+            "que no esté ahí NO lo sabes: no lo inventes, ofrece que una persona "
+            "lo confirme."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    }},
+    {"type": "function", "function": {
+        "name": "confirmar_turno",
+        "description": (
+            "Marca como CONFIRMADO el próximo turno del paciente. Solo cuando "
+            "dice con claridad que va a ir («confirmo», «ahí estaré», «sí, voy»), "
+            "normalmente respondiendo a un recordatorio."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    }},
+    {"type": "function", "function": {
+        "name": "cancelar_turno",
+        "description": (
+            "Cancela el próximo turno del paciente y libera el horario. SOLO "
+            "después de preguntarle «¿querés que cancele tu turno del <día y "
+            "hora>?» y que diga que sí sin ambigüedad. Si en cambio quiere "
+            "moverlo, usa reschedule_session."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "confirmado": {
+                    "type": "boolean",
+                    "description": "true SOLO si el paciente confirmó explícitamente la cancelación",
+                },
+                "frase_del_paciente": {
+                    "type": "string",
+                    "description": "Lo que escribió para confirmar. Si no puedes citarlo, todavía no confirmó.",
+                },
+            },
+            "required": ["confirmado", "frase_del_paciente"],
+        },
+    }},
+    {"type": "function", "function": {
+        "name": "lista_de_espera",
+        "description": (
+            "Anota al paciente en la lista de espera cuando NO hay un horario que "
+            "le sirva. Si se libera uno compatible, el consultorio le avisa. "
+            "Pregunta antes si quiere que lo anotes."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "professional_id": {"type": "string"},
+                "appointment_type_id": {"type": "string"},
+                "preferencias": {
+                    "type": "string",
+                    "description": "Días u horarios que le sirven, con sus palabras",
+                },
+            },
+        },
+    }},
+    {"type": "function", "function": {
+        "name": "urgencia",
+        "description": (
+            "El paciente describe algo que suena urgente. NO diagnostiques ni "
+            "des indicaciones médicas: llama esta herramienta, avisa al equipo y "
+            "pasa la conversación a una persona. nivel='urgente' para riesgo "
+            "vital (dolor de pecho, no puede respirar, sangrado que no para, "
+            "convulsión, desmayo, golpe fuerte) — pausa la IA. nivel='prioritario' "
+            "para dolor muy fuerte, hinchazón, fiebre alta, pieza rota — queda "
+            "al frente de la cola. Ante la duda, urgente."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "nivel": {"type": "string", "description": "urgente | prioritario"},
+                "motivo": {"type": "string", "description": "Qué dijo el paciente, en pocas palabras"},
+            },
+            "required": ["nivel", "motivo"],
+        },
+    }},
+    {"type": "function", "function": {
+        "name": "registrar_encuesta",
+        "description": (
+            "Guarda la respuesta del paciente a la encuesta de «¿cómo te fue?» "
+            "(contexto: surveyPending). puntaje es un entero de 1 a 5."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "puntaje": {"type": "integer", "minimum": 1, "maximum": 5},
+                "comentario": {"type": "string"},
+            },
+            "required": ["puntaje"],
+        },
+    }},
+    {"type": "function", "function": {
+        "name": "guardar_paciente",
+        "description": (
+            "Guarda datos ADMINISTRATIVOS del paciente: documento, fecha de "
+            "nacimiento (AAAA-MM-DD), obra social (id del catálogo) y número de "
+            "afiliado. NUNCA síntomas, diagnósticos ni nada clínico. Úsala solo "
+            "con lo que el paciente te dio; no pidas datos de más."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "documento": {"type": "string"},
+                "fecha_nacimiento": {"type": "string", "description": "AAAA-MM-DD"},
+                "obra_social_id": {"type": "string"},
+                "numero_afiliado": {"type": "string"},
+                "no_enviar_seguimientos": {
+                    "type": "boolean",
+                    "description": "true si pidió no recibir recordatorios de control ni seguimientos",
+                },
+            },
+        },
+    }},
+]
+
+SALUD_TOOLS = frozenset(t["function"]["name"] for t in SALUD_SCHEMAS)
+
+# Parámetros que el vertical suma a las herramientas de agenda de siempre.
+_SALUD_PROPS_PROPOSE = {
+    "professional_id": {
+        "type": "string",
+        "description": "Opcional: solo horarios de ESTE profesional (id del catálogo).",
+    },
+    "appointment_type_id": {
+        "type": "string",
+        "description": "Opcional: el tipo de turno (id del catálogo); define la duración.",
+    },
+    "insurance_id": {
+        "type": "string",
+        "description": "Opcional: la obra social del paciente (id del catálogo); filtra a quienes la atienden.",
+    },
+}
+_SALUD_PROPS_BOOK = {
+    "appointment_type_id": {
+        "type": "string",
+        "description": "El tipo de turno elegido (id del catálogo), si el paciente lo dijo.",
+    },
+    "insurance_id": {
+        "type": "string",
+        "description": "La obra social del paciente (id del catálogo), si la dijo.",
+    },
+}
+
+
+def hay_salud(context: dict[str, Any] | None) -> bool:
+    """¿El CRM manda el bloque `salud`? Solo entonces existe el vertical."""
+    return isinstance((context or {}).get("salud"), dict)
+
+
+def con_salud(schemas: list[dict[str, Any]], activo: bool) -> list[dict[str, Any]]:
+    """El catálogo del turno más las herramientas del consultorio.
+
+    Sin `activo` devuelve EXACTAMENTE lo que recibió. Con él, suma los
+    parámetros de profesional/tipo/obra social a propose_slots y book_session
+    (si esas herramientas están) y agrega las propias del vertical.
+    """
+    if not activo:
+        return schemas
+    import copy
+
+    out = copy.deepcopy(schemas)
+    nombres = {t["function"]["name"] for t in out}
+    for t in out:
+        nombre = t["function"]["name"]
+        props = t["function"]["parameters"].setdefault("properties", {})
+        if nombre == "propose_slots":
+            props.update(copy.deepcopy(_SALUD_PROPS_PROPOSE))
+        elif nombre == "book_session":
+            props.update(copy.deepcopy(_SALUD_PROPS_BOOK))
+    agenda = "propose_slots" in nombres
+    for t in SALUD_SCHEMAS:
+        nombre = t["function"]["name"]
+        # Sin agenda no hay turnos que confirmar, cancelar ni lista de espera;
+        # el catálogo y la urgencia sirven igual.
+        if not agenda and nombre not in ("salud_catalogo", "urgencia", "guardar_paciente"):
+            continue
+        out.append(copy.deepcopy(t))
+    return out
+
+
 # 034 — De qué clave del catálogo del CRM es cada herramienta. Una que no esté
 # aquí no se puede apagar desde el CRM.
 CLAVE_DE_HERRAMIENTA = {
@@ -282,6 +473,16 @@ CLAVE_DE_HERRAMIENTA = {
     "reschedule_session": "reprogramar",
     "route_out": "salida",
     "handoff": "escalar",
+    # 070 — La urgencia comparte la clave de `escalar`: SIEMPRE encendida (es
+    # una red de seguridad, no una opción del negocio). El resto del
+    # consultorio va con `agendar`.
+    "urgencia": "escalar",
+    "salud_catalogo": "agendar",
+    "confirmar_turno": "agendar",
+    "cancelar_turno": "agendar",
+    "lista_de_espera": "agendar",
+    "registrar_encuesta": "agendar",
+    "guardar_paciente": "agendar",
 }
 
 
@@ -435,9 +636,17 @@ def _slots_from_payload(
                 start_utc=start,
                 end_utc=end,
                 label=_label_of(raw, start),
+                # 070 — llaves ausentes en un CRM sin el vertical: quedan None.
+                professional_id=_texto(raw.get("professionalId")),
+                professional_name=_texto(raw.get("professionalName")),
+                appointment_type_id=_texto(raw.get("appointmentTypeId")),
             )
         )
     return out
+
+
+def _texto(v: Any) -> str | None:
+    return v.strip() if isinstance(v, str) and v.strip() else None
 
 
 def _zona_del_negocio(ctx: AppContext) -> ZoneInfo:
@@ -453,7 +662,16 @@ def _zona_del_negocio(ctx: AppContext) -> ZoneInfo:
 
 
 def _slots_for_llm(slots: list[OfferedSlot]) -> list[dict[str, str]]:
-    return [{"start_utc": _iso_z(s.start_utc), "label": s.label} for s in slots]
+    out: list[dict[str, str]] = []
+    for s in slots:
+        item = {"start_utc": _iso_z(s.start_utc), "label": s.label}
+        # 070 — con quién es: el modelo lo nombra al ofrecer, y solo si existe.
+        if s.professional_name:
+            item["profesional"] = s.professional_name
+        if s.professional_id:
+            item["professional_id"] = s.professional_id
+        out.append(item)
+    return out
 
 
 class ToolRuntime:
@@ -468,8 +686,12 @@ class ToolRuntime:
         tz: ZoneInfo | None = None,
         conversacion_reciente: str | None = None,
         etapas: list[str] | None = None,
+        salud: bool = False,
     ) -> None:
         self._ctx = ctx
+        # 070 — ¿el CRM trae el vertical salud para este turno? (bloque `salud`
+        # del contexto). Sin él, ninguna de sus herramientas existe.
+        self.salud = salud
         # 038 — A qué etapas puede mover al lead (`lead.nextStages`).
         self.etapas: list[str] = list(etapas or [])
         # Lo último que se dijo en la conversación (app/dias.py). None ⇒ no
@@ -486,6 +708,9 @@ class ToolRuntime:
         self.routed_out = False
         self.proposed = False
         self.etapa_movida: str | None = None
+        # 070 — efectos del consultorio observables por turn.py:
+        self.urgencia: dict[str, Any] | None = None
+        self.turno_cancelado = False
 
     async def execute(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -499,6 +724,8 @@ class ToolRuntime:
                 if args.get("confirmation") is not True or not args.get("selection_token"):
                     return {"ok": False, "error": "confirmation_required"}
                 return await self._ctx.crm.cancel_booking(self._crm_conv_id, str(args["selection_token"]), True)
+            if self.salud and name in SALUD_TOOLS:
+                return await self._salud_tool(name, args)
             if name == "update_ficha":
                 return await self._update_ficha(args)
             if name == "move_stage":
@@ -577,9 +804,14 @@ class ToolRuntime:
                 limit=MAX_OFFERED,
                 per_day=OFFER_PER_DAY,
                 days=OFFER_DAYS,
+                **self._salud_kwargs(args),
             )
         except AgendaUnavailable:
             return self._sin_agenda()
+        except CrmConflict as exc:
+            # 070 — un id de profesional/tipo/obra social que el CRM no conoce:
+            # su mensaje dice cuál, y el modelo lo corrige con el catálogo.
+            return self._parametro_invalido(exc)
         query = consulta.get("query") if isinstance(consulta.get("query"), dict) else None
         if fecha:
             return await self._huecos_del_dia(fecha, consulta["slots"], query)
@@ -854,6 +1086,17 @@ class ToolRuntime:
                 result = await self._ctx.crm.create_booking(
                     self._crm_conv_id, _iso_z(chosen.start_utc), reminder_consent=consent
                 )
+            elif self.salud:
+                # 070 — con quién y para qué: del horario ofrecido, y lo que el
+                # paciente dijo del tipo de turno y la obra social.
+                result = await self._ctx.crm.create_booking(
+                    self._crm_conv_id,
+                    _iso_z(chosen.start_utc),
+                    professional_id=chosen.professional_id,
+                    appointment_type_id=_texto(args.get("appointment_type_id"))
+                    or chosen.appointment_type_id,
+                    insurance_id=_texto(args.get("insurance_id")),
+                )
             else:
                 result = await self._ctx.crm.create_booking(
                     self._crm_conv_id, _iso_z(chosen.start_utc)
@@ -887,8 +1130,37 @@ class ToolRuntime:
             )
         except CrmError as exc:  # best-effort: la cita ya existe
             logger.warning("tools: no pude actualizar ficha tras booking: %s", exc)
+        extra: dict[str, Any] = {}
+        if self.salud:
+            if chosen.professional_name:
+                extra["profesional"] = chosen.professional_name
+                self.booking_confirmation["profesional"] = chosen.professional_name
+            if result.get("depositAmount"):
+                # La confirmación del turno es autoritativa (finalize_reply): la
+                # seña viaja en ella, con el cómo-pagar REAL que cargó el
+                # consultorio (o, si no hay, sin inventar uno).
+                self.booking_confirmation["sena_monto"] = result.get("depositAmount")
+                try:
+                    reglas = (await self._ctx.crm.salud_catalogo()).get("rules") or {}
+                    info = _texto(reglas.get("depositPaymentInfo"))
+                except CrmError as exc:  # best-effort: la cita ya existe
+                    logger.warning("tools: no pude leer cómo se paga la seña: %s", exc)
+                    info = None
+                self.booking_confirmation["sena_info"] = info
+                extra["sena"] = {
+                    "monto": result.get("depositAmount"),
+                    "estado": result.get("depositStatus") or "pendiente",
+                    "instrucciones": (
+                        "este turno pide seña: díselo con el monto exacto y, para "
+                        "cómo pagarla, usa SOLO lo que diga salud_catalogo en "
+                        "rules.depositPaymentInfo. Si no hay nada cargado, dile que "
+                        "una persona le pasa los datos de pago. No inventes alias "
+                        "ni links."
+                    ),
+                }
         return {
             "ok": True,
+            **extra,
             # La etiqueta del slot ofrecido trae el día en palabras; la del
             # CRM es la corta. Se repite ESTA para que el lead lea el día.
             "label": chosen.label or result.get("label"),
@@ -919,7 +1191,18 @@ class ToolRuntime:
         if not data:
             return text
         label = data.get("label") or "el horario acordado"
-        parts = [f"Listo, tu cita quedó confirmada para {label}."]
+        # 070 — con quién es, si el consultorio tiene profesionales.
+        con = f" con {data['profesional']}" if data.get("profesional") else ""
+        parts = [f"Listo, tu cita quedó confirmada para {label}{con}."]
+        if data.get("sena_monto"):
+            parts.append(
+                f"Este turno lleva una seña de ${data['sena_monto']}. "
+                + (
+                    str(data["sena_info"])
+                    if data.get("sena_info")
+                    else "Una persona del equipo te pasa los datos para abonarla."
+                )
+            )
         if data.get("meeting_url"):
             parts.append(f"Enlace de la reunión: {data['meeting_url']}")
         elif data.get("link_pending"):
@@ -973,6 +1256,145 @@ class ToolRuntime:
                 "mismo salvo que aquí venga otro"
             ),
         }
+
+    # ------------------------------------------------------------------ salud
+
+    def _salud_kwargs(self, args: dict[str, Any]) -> dict[str, str]:
+        """Profesional, tipo y obra social pedidos; vacío fuera del vertical."""
+        if not self.salud:
+            return {}
+        out: dict[str, str] = {}
+        for clave in ("professional_id", "appointment_type_id", "insurance_id"):
+            v = _texto(args.get(clave))
+            if v:
+                out[clave] = v
+        return out
+
+    def _parametro_invalido(self, exc: CrmConflict) -> dict[str, Any]:
+        error = exc.payload.get("error")
+        detalle = error.get("message") if isinstance(error, dict) else None
+        return {
+            "ok": False,
+            "error": "parametro_invalido",
+            "detalle": (detalle or "el CRM no reconoce ese dato")
+            + ". Revisa los ids con salud_catalogo; no inventes ninguno.",
+        }
+
+    async def _salud_tool(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        crm = self._ctx.crm
+        cid = self._crm_conv_id
+        try:
+            if name == "salud_catalogo":
+                return {"ok": True, **(await crm.salud_catalogo())}
+            if name == "confirmar_turno":
+                r = await crm.salud_confirmar(cid)
+                return {
+                    "ok": True,
+                    **{k: r[k] for k in ("scheduledAt", "depositStatus", "depositAmount") if k in r},
+                    "instrucciones": (
+                        "turno confirmado: agradece breve y, si todavía hay seña "
+                        "pendiente, recuérdasela con el monto."
+                    ),
+                }
+            if name == "cancelar_turno":
+                # Doble llave: la bandera Y la frase que la sostiene. Sin una
+                # confirmación citable, se pregunta; no se cancela.
+                if args.get("confirmado") is not True or not str(
+                    args.get("frase_del_paciente") or ""
+                ).strip():
+                    return {
+                        "ok": False,
+                        "error": "confirmacion_requerida",
+                        "detalle": (
+                            "pregúntale «¿querés que cancele tu turno del <día y "
+                            "hora>?» y espera su sí antes de llamar otra vez"
+                        ),
+                    }
+                logger.info(
+                    "tools: cancelar_turno (el paciente confirmó con: %r)",
+                    str(args.get("frase_del_paciente"))[:120],
+                )
+                await crm.salud_cancelar(cid)
+                self.turno_cancelado = True
+                return {
+                    "ok": True,
+                    "instrucciones": (
+                        "turno cancelado. Confírmaselo y ofrécele reprogramar si "
+                        "quiere; sin presión."
+                    ),
+                }
+            if name == "lista_de_espera":
+                r = await crm.salud_espera(
+                    cid,
+                    professional_id=_texto(args.get("professional_id")),
+                    appointment_type_id=_texto(args.get("appointment_type_id")),
+                    preferences=_texto(args.get("preferencias")),
+                )
+                return {
+                    "ok": True,
+                    "waitlistId": r.get("waitlistId"),
+                    "instrucciones": (
+                        "anotado: dile que si se libera un horario compatible se "
+                        "lo avisan por acá. No prometas un horario concreto."
+                    ),
+                }
+            if name == "urgencia":
+                nivel = "prioritario" if str(args.get("nivel") or "").strip().lower() == "prioritario" else "urgente"
+                r = await crm.salud_urgencia(cid, nivel, str(args.get("motivo") or "sin detalle")[:300])
+                self.urgencia = {"nivel": r.get("level") or nivel, "mensaje": r.get("message")}
+                return {
+                    "ok": True,
+                    "nivel": r.get("level") or nivel,
+                    "mensaje_para_el_paciente": r.get("message"),
+                    "instrucciones": (
+                        "avisa al paciente con ese mensaje (con tus palabras, "
+                        "breve y humano). NO diagnostiques ni des indicaciones "
+                        "médicas. El equipo ya fue avisado."
+                    ),
+                }
+            if name == "registrar_encuesta":
+                try:
+                    puntaje = int(args.get("puntaje"))  # type: ignore[arg-type]
+                except (TypeError, ValueError):
+                    return {"ok": False, "error": "puntaje_invalido", "detalle": "es un entero de 1 a 5"}
+                r = await crm.salud_encuesta(cid, puntaje, _texto(args.get("comentario")))
+                out: dict[str, Any] = {"ok": True, "puntaje": r.get("score", puntaje)}
+                if r.get("reviewUrl"):
+                    out["link_de_resena"] = r["reviewUrl"]
+                    out["instrucciones"] = (
+                        "agradece y pídele, sin insistir, que deje su opinión en "
+                        "este link."
+                    )
+                else:
+                    out["instrucciones"] = "agradece su respuesta; si fue baja, dile que el equipo lo va a tener en cuenta."
+                return out
+            if name == "guardar_paciente":
+                datos: dict[str, Any] = {}
+                mapa = {
+                    "documento": "documentNumber",
+                    "fecha_nacimiento": "birthDate",
+                    "obra_social_id": "insuranceId",
+                    "numero_afiliado": "affiliateNumber",
+                }
+                for clave, destino in mapa.items():
+                    v = _texto(args.get(clave))
+                    if v:
+                        datos[destino] = v
+                if isinstance(args.get("no_enviar_seguimientos"), bool):
+                    datos["optOutFollowups"] = args["no_enviar_seguimientos"]
+                if not datos:
+                    return {"ok": True, "nota": "sin datos nuevos"}
+                await crm.salud_paciente(cid, datos)
+                return {"ok": True}
+        except CrmConflict as exc:
+            error = exc.payload.get("error")
+            detalle = error.get("message") if isinstance(error, dict) else None
+            return {
+                "ok": False,
+                "error": exc.code,
+                "detalle": detalle or "el CRM no pudo hacerlo; si hace falta, haz handoff",
+            }
+        return {"ok": False, "error": f"herramienta desconocida: {name}"}
 
     async def _route_out(self) -> dict[str, Any]:
         # "dio_diy" es el valor del enum `resultado` en el gateway del CRM

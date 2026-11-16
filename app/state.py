@@ -89,6 +89,10 @@ class OfferedSlot:
     end_utc: datetime | None
     label: str
     offered_at: datetime = field(default_factory=utcnow)
+    # 070 — vertical salud: con quién y para qué tipo de turno es este horario.
+    professional_id: str | None = None
+    professional_name: str | None = None
+    appointment_type_id: str | None = None
 
 
 @dataclass

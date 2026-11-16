@@ -340,6 +340,9 @@ class CrmClient:
         limit: int = 12,
         per_day: int | None = None,
         days: int | None = None,
+        professional_id: str | None = None,
+        appointment_type_id: str | None = None,
+        insurance_id: str | None = None,
     ) -> dict[str, Any]:
         """Huecos + `query`: hasta dónde llega lo consultado.
 
@@ -355,8 +358,18 @@ class CrmClient:
             params["days"] = days
         if date:
             params["date"] = date
+        # 070 — vertical salud (un CRM sin él ignora estos parámetros).
+        if professional_id:
+            params["professionalId"] = professional_id
+        if appointment_type_id:
+            params["appointmentTypeId"] = appointment_type_id
+        if insurance_id:
+            params["insuranceId"] = insurance_id
         resp = await self._request("GET", "/api/bot/availability", params=params)
         _404_de_agenda(resp, "availability")
+        if resp.status_code == 422:
+            # Un id inventado por el modelo: el CRM lo dice con su mensaje.
+            raise CrmConflict("invalid", _payload(resp))
         if resp.status_code != 200:
             raise CrmError(f"availability devolvió {resp.status_code}")
         data = resp.json()
@@ -396,13 +409,23 @@ class CrmClient:
         return True if resultado is None else resultado
 
     async def create_booking(
-        self, conversation_id: str, start_utc: str
+        self,
+        conversation_id: str,
+        start_utc: str,
+        *,
+        professional_id: str | None = None,
+        appointment_type_id: str | None = None,
+        insurance_id: str | None = None,
     ) -> dict[str, Any]:
-        resp = await self._request(
-            "POST",
-            "/api/bot/bookings",
-            json={"conversationId": conversation_id, "startUtc": start_utc},
-        )
+        body: dict[str, Any] = {"conversationId": conversation_id, "startUtc": start_utc}
+        # 070 — solo si hay: contra un CRM sin salud el cuerpo es el de siempre.
+        if professional_id:
+            body["professionalId"] = professional_id
+        if appointment_type_id:
+            body["appointmentTypeId"] = appointment_type_id
+        if insurance_id:
+            body["insuranceId"] = insurance_id
+        resp = await self._request("POST", "/api/bot/bookings", json=body)
         if resp.status_code == 409:
             raise _booking_conflict(resp)
         _404_de_agenda(resp, "bookings")
@@ -438,6 +461,81 @@ class CrmClient:
             raise CrmError(f"reschedule devolvió {resp.status_code}")
         data: dict[str, Any] = resp.json()
         return data
+
+    # ------------------------------------------------------------------ salud
+    # 070 — Vertical salud de Vocero (solo el CRM raíz con profesionales
+    # cargados; el contexto trae el bloque `salud` y es lo que enciende esto).
+
+    async def _salud(
+        self, method: str, path: str, *, json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Llama a `/api/bot/salud/...`. Un 4xx del CRM sube como `CrmConflict`
+        con su código y su mensaje (para que el modelo lo lea); lo demás, como
+        `CrmError`/`CrmUnreachable`."""
+        kwargs: dict[str, Any] = {}
+        if json is not None:
+            kwargs["json"] = json
+        if params is not None:
+            kwargs["params"] = params
+        resp = await self._request(method, f"/api/bot/salud/{path}", **kwargs)
+        if es_caida(resp.status_code):
+            raise CrmUnreachable(f"salud/{path} devolvió {resp.status_code}")
+        if 400 <= resp.status_code < 500:
+            raise CrmConflict(_conflict_code(resp), _payload(resp))
+        if resp.status_code not in (200, 201):
+            raise CrmError(f"salud/{path} devolvió {resp.status_code}")
+        return _payload(resp)
+
+    async def salud_catalogo(self) -> dict[str, Any]:
+        return await self._salud("GET", "catalog")
+
+    async def salud_confirmar(self, conversation_id: str) -> dict[str, Any]:
+        return await self._salud("POST", "turno/confirmar", json={"conversationId": conversation_id})
+
+    async def salud_cancelar(self, conversation_id: str) -> dict[str, Any]:
+        return await self._salud(
+            "POST", "turno/cancelar", json={"conversationId": conversation_id, "confirmed": True}
+        )
+
+    async def salud_espera(
+        self,
+        conversation_id: str,
+        professional_id: str | None = None,
+        appointment_type_id: str | None = None,
+        preferences: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._salud(
+            "POST",
+            "espera",
+            json={
+                "conversationId": conversation_id,
+                "professionalId": professional_id,
+                "appointmentTypeId": appointment_type_id,
+                "preferences": preferences,
+            },
+        )
+
+    async def salud_urgencia(
+        self, conversation_id: str, level: str, reason: str
+    ) -> dict[str, Any]:
+        return await self._salud(
+            "POST",
+            "urgencia",
+            json={"conversationId": conversation_id, "level": level, "reason": reason},
+        )
+
+    async def salud_encuesta(
+        self, conversation_id: str, score: int, comment: str | None = None
+    ) -> dict[str, Any]:
+        return await self._salud(
+            "POST",
+            "encuesta",
+            json={"conversationId": conversation_id, "score": score, "comment": comment},
+        )
+
+    async def salud_paciente(self, conversation_id: str, datos: dict[str, Any]) -> dict[str, Any]:
+        return await self._salud("PUT", "paciente", json={"conversationId": conversation_id, **datos})
 
     async def post_typing(self, conversation_id: str) -> None:
         """Marca leído + "escribiendo…" (007). Best-effort: sin reintentos."""

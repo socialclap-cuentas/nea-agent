@@ -285,13 +285,19 @@ class PgStore(PgDispatchStore):
                 for slot in slots:
                     await conn.execute(
                         """
-                        INSERT INTO offered_slots (conversation_id, start_utc, end_utc, label)
-                        VALUES ($1, $2, $3, $4)
+                        INSERT INTO offered_slots (
+                            conversation_id, start_utc, end_utc, label,
+                            professional_id, professional_name, appointment_type_id
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
                         """,
                         conversation_id,
                         slot.start_utc,
                         slot.end_utc,
                         slot.label,
+                        slot.professional_id,
+                        slot.professional_name,
+                        slot.appointment_type_id,
                     )
 
     async def get_offered_slots(self, conversation_id: int) -> list[OfferedSlot]:
@@ -306,6 +312,9 @@ class PgStore(PgDispatchStore):
                 end_utc=r["end_utc"],
                 label=r["label"],
                 offered_at=r["offered_at"],
+                professional_id=r["professional_id"],
+                professional_name=r["professional_name"],
+                appointment_type_id=r["appointment_type_id"],
             )
             for r in rows
         ]

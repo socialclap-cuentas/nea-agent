@@ -390,6 +390,106 @@ def _linea_cerrada(cerrada: dict) -> str:
     return f"- Su cita del {label} ya no está vigente."
 
 
+def _salud_lines(context: dict | None, now: datetime, tz: ZoneInfo) -> list[str]:
+    """070 — Lo que el agente sabe del PACIENTE y el protocolo del consultorio.
+
+    Solo si el CRM manda el bloque `salud` (Vocero con profesionales cargados);
+    sin él, el prompt es el de siempre. No relaja ningún NUNCA del chasis: suma
+    reglas propias de un consultorio.
+    """
+    salud = (context or {}).get("salud")
+    if not isinstance(salud, dict):
+        return []
+    lines = [
+        "- ESTE NEGOCIO ES UN CONSULTORIO DE SALUD. Reglas propias, además de las de siempre:",
+        "  · NUNCA diagnostiques, interpretes síntomas, recomiendes medicación ni "
+        "des indicaciones médicas, ni siquiera «para mientras tanto». Eso es del "
+        "profesional. Tu trabajo es ordenar turnos y orientar con lo que el negocio cargó.",
+        "  · Si el paciente cuenta algo que suena URGENTE (dolor fuerte o de pecho, "
+        "no poder respirar, sangrado que no para, desmayo, convulsión, golpe fuerte, "
+        "hinchazón en la cara o el cuello, fiebre alta, una pieza rota) llama a la "
+        "herramienta urgencia EN ESE MISMO TURNO, antes de ofrecer horarios. Ante "
+        "la duda, urgencia. Después, un solo mensaje breve y humano con lo que "
+        "devuelve la herramienta; nada de seguir vendiendo ni agendando.",
+        "  · Precios, duraciones, preparación, obras sociales y seña: SOLO lo que "
+        "diga salud_catalogo. Si no está, dilo y ofrece que una persona lo confirme; "
+        "no lo supongas.",
+        "  · Antes de agendar, averigua qué necesita (tipo de turno) y, si pregunta o "
+        "importa, su obra social; con eso consulta propose_slots con el tipo y la "
+        "obra social. Nombra siempre con quién es cada horario si viene en `profesional`.",
+        "  · Datos del paciente: pide solo lo necesario para el turno (nombre, "
+        "documento, obra social y afiliado) y guárdalos con guardar_paciente. NUNCA "
+        "guardes ni repitas síntomas o diagnósticos.",
+        "  · Si pide cancelar su turno: confirma el día y la hora, pregunta «¿querés "
+        "que lo cancele?» y SOLO con su sí llama cancelar_turno. Si prefiere moverlo, "
+        "usa reschedule_session. Si no hay horario que le sirva, ofrécele la lista de "
+        "espera (lista_de_espera) con su permiso.",
+    ]
+    nb = salud.get("nextBooking")
+    if isinstance(nb, dict):
+        con = (nb.get("professional") or {}).get("name") if isinstance(nb.get("professional"), dict) else None
+        tipo = (nb.get("appointmentType") or {}).get("name") if isinstance(nb.get("appointmentType"), dict) else None
+        detalle = " · ".join(x for x in (con, tipo) if x)
+        lines.append(
+            f"- Próximo turno del paciente: {nb.get('label')}"
+            + (f" ({detalle})" if detalle else "")
+            + f". Confirmación: {nb.get('confirmation')}."
+        )
+        prep = (nb.get("appointmentType") or {}).get("prepNotes") if isinstance(nb.get("appointmentType"), dict) else None
+        if prep:
+            lines.append(f"- Preparación para ese turno (dila si corresponde): {prep}")
+        if nb.get("depositStatus") == "pendiente":
+            monto = nb.get("depositAmount")
+            lines.append(
+                "- Ese turno tiene una SEÑA PENDIENTE"
+                + (f" de {monto}" if monto else "")
+                + ": si el paciente pregunta cómo pagarla, usa solo lo que diga "
+                "salud_catalogo (rules.depositPaymentInfo)."
+            )
+        if nb.get("reminderSent"):
+            lines.append(
+                "- Ya se le mandó un recordatorio de ese turno: lo que conteste "
+                "probablemente responde a eso. «Confirmo», «ahí estaré» o «voy» → "
+                "confirmar_turno. «No puedo ir» o «cancelo» → pregunta si quiere "
+                "cancelar o mover, y sigue las reglas de arriba."
+            )
+    if salud.get("surveyPending"):
+        lines.append(
+            "- El paciente tiene una ENCUESTA esperando respuesta («¿cómo te fue?», "
+            "del 1 al 5). Si contesta con un número, llama registrar_encuesta. Si "
+            "el resultado trae un link de reseña, agradécele y compártelo sin insistir."
+        )
+    espera = salud.get("waitlist")
+    if isinstance(espera, dict) and espera.get("status") == "offered" and espera.get("offeredLabel"):
+        lines.append(
+            f"- Se le OFRECIÓ al paciente el horario {espera.get('offeredLabel')} desde la "
+            "lista de espera. Si lo acepta sin ambigüedad, resérvalo con book_session "
+            "(ya figura entre los horarios ofrecidos); si no lo quiere, sigue en la lista."
+        )
+    elif isinstance(espera, dict) and espera.get("status") == "waiting":
+        lines.append("- El paciente está en la lista de espera: no lo anotes de nuevo.")
+    if salud.get("openUrgency"):
+        lines.append(
+            "- Hay una URGENCIA abierta de este paciente: una persona del equipo la "
+            "está atendiendo. No agendes ni sigas conversando de turnos; si escribe, "
+            "contesta breve y con calma que ya lo están atendiendo."
+        )
+    pac = salud.get("patient")
+    if isinstance(pac, dict):
+        faltan = [
+            n
+            for n, k in (("documento", "documentNumber"), ("obra social", "insuranceId"))
+            if not pac.get(k)
+        ]
+        if faltan:
+            lines.append(
+                "- Datos administrativos que aún no tenemos del paciente: "
+                + ", ".join(faltan)
+                + ". Pídelos solo cuando vengan al caso (al agendar), nunca como interrogatorio."
+            )
+    return lines
+
+
 def build_system_prompt(
     *,
     profile: BusinessProfile,
@@ -518,6 +618,7 @@ def build_system_prompt(
         )
 
     lines.extend(_booking_lines((context or {}).get("booking"), now))
+    lines.extend(_salud_lines(context, now, tz))
 
     return (
         _chassis(profile, canal or ((context or {}).get("contact") or {}).get("channel"))

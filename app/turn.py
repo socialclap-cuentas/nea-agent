@@ -36,6 +36,9 @@ from app.state import AppContext, BotMessage, InboundMessage, utcnow
 from app.tools import (
     ToolRuntime,
     con_mover_etapa,
+    _slots_from_payload,
+    con_salud,
+    hay_salud,
     etapas_siguientes,
     solo_encendidas,
     tool_schemas,
@@ -372,6 +375,7 @@ async def run_turn(
     # CRM llega sin reiniciar Nea, y un 404 de la bandera no apaga para siempre.
     ctx.agenda_enabled = await agenda_vigente(ctx)
     referral = next((m.referral_headline for m in inbound if m.referral_headline), None)
+    await _sembrar_hueco_de_espera(ctx, conv.id, context)
     offered = await ctx.store.get_offered_slots(conv.id)
     profile = await resolve_profile(ctx)
     # 034 — Con «agendar» apagada en el CRM, el turno se porta como contra un
@@ -448,6 +452,7 @@ async def run_turn(
         tz=tz,
         conversacion_reciente=_conversacion_reciente(history),
         etapas=etapas_siguientes(context),
+        salud=hay_salud(context),
     )
     try:
         final_text = await _tool_loop(ctx, messages, runtime)
@@ -634,6 +639,41 @@ async def _run_reset(ctx: AppContext, conv: Any, identity: str) -> None:
         )
 
 
+async def _sembrar_hueco_de_espera(
+    ctx: AppContext, conv_id: int, context: dict[str, Any] | None
+) -> None:
+    """070 — El CRM le ofreció un hueco desde la lista de espera.
+
+    Esa oferta vive en el CRM; para Nea solo es reservable lo que ella misma
+    ofreció (regla de las dos llaves). Si el contexto trae el hueco, se
+    siembra en su memoria de ofertas — SIN pisar una oferta propia que ya
+    tuviera: lo que el paciente está mirando ahora manda.
+    """
+    espera = ((context or {}).get("salud") or {}).get("waitlist") or {}
+    hueco = espera.get("offered") if isinstance(espera, dict) else None
+    if not isinstance(hueco, dict):
+        return
+    try:
+        if await ctx.store.get_offered_slots(conv_id):
+            return
+        slots = _slots_from_payload(
+            conv_id,
+            [
+                {
+                    "startUtc": hueco.get("startUtc"),
+                    "label": hueco.get("label"),
+                    "professionalId": hueco.get("professionalId"),
+                    "professionalName": hueco.get("professionalName"),
+                    "appointmentTypeId": hueco.get("appointmentTypeId"),
+                }
+            ],
+        )
+        if slots:
+            await ctx.store.replace_offered_slots(conv_id, slots)
+    except Exception as exc:  # best-effort: sin esto el turno sigue igual
+        logger.warning("turno: no pude sembrar el hueco de la lista de espera: %s", exc)
+
+
 async def _fetch_context(ctx: AppContext, identity: str) -> dict[str, Any] | None:
     """El contexto del CRM, o None si el CRM dice que no conoce la conversación.
 
@@ -729,13 +769,16 @@ async def _tool_loop(
         reply = await ctx.llm.complete(
             messages,
             tools=solo_encendidas(
-                con_mover_etapa(
-                    tool_schemas(
-                        ctx.agenda_enabled,
-                        bool(getattr(ctx.crm, "supports_agenda_v2", False)),
-                        bool(getattr(ctx.crm, "supports_coordination", False)),
+                con_salud(
+                    con_mover_etapa(
+                        tool_schemas(
+                            ctx.agenda_enabled,
+                            bool(getattr(ctx.crm, "supports_agenda_v2", False)),
+                            bool(getattr(ctx.crm, "supports_coordination", False)),
+                        ),
+                        getattr(runtime, "etapas", []),
                     ),
-                    getattr(runtime, "etapas", []),
+                    bool(getattr(runtime, "salud", False)),
                 ),
                 getattr(runtime, "_profile", None),
             ),
