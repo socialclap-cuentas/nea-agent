@@ -1142,7 +1142,7 @@ class ToolRuntime:
         }
 
     def _faltan_datos(self, args: dict[str, Any]) -> dict[str, Any] | None:
-        """Sin documento y obra social (o «particular» citado) no se reserva.
+        """Sin documento y obra social (o «particular» citado) no se reserva (la fecha de nacimiento es opcional).
 
         El prompt lo pide, pero un modelo apurado lo saltea y el turno queda
         sin datos: se hace cumplir acá, en código.
@@ -1152,8 +1152,9 @@ class ToolRuntime:
         faltan: list[str] = []
         if not self._dni_ok:
             faltan.append("documento (DNI)")
-        if not self._nac_ok:
-            faltan.append("fecha de nacimiento")
+        # La fecha de nacimiento NO traba la reserva: es opcional (se guarda si
+        # el paciente la da; si no, se pide en el consultorio). Pedirla de más
+        # hacía que el paciente abandonara el turno.
         particular = bool(_PARTICULAR.search(_texto(args.get("sin_obra_social")) or ""))
         if not (self._os_ok or _texto(args.get("insurance_id")) or particular):
             faltan.append("obra social (o que viene particular)")

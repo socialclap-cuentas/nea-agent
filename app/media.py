@@ -38,6 +38,9 @@ _AUDIO_EXT = {
 }
 
 
+MIN_AUDIO_BYTES = 1500
+
+
 @dataclass
 class MediaPart:
     """Render de un ítem multimedia para el turno."""
@@ -75,6 +78,10 @@ async def _audio(ctx: AppContext, msg: InboundMessage) -> MediaPart:
         return _honest_failure(msg)
     data, mime = await ctx.crm.get_media(msg.media_id)
     if len(data) > MAX_MEDIA_BYTES:
+        return _honest_failure(msg)
+    # Un audio de ~0 segundos pesa unos pocos bytes: transcribirlo hace que el
+    # modelo invente texto sobre el silencio. Se trata como «no se pudo oír».
+    if len(data) < MIN_AUDIO_BYTES:
         return _honest_failure(msg)
     mime_clean = (mime or msg.media_mime or "audio/ogg").split(";")[0].strip()
     ext = _AUDIO_EXT.get(mime_clean, "ogg")

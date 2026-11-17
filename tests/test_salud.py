@@ -153,7 +153,9 @@ async def test_book_session_no_reserva_sin_documento_ni_obra_social(rt_sin_datos
     )
     assert r["ok"] is False
     assert r["error"] == "faltan_datos_del_paciente"
-    assert len(r["faltan"]) == 3
+    # La fecha de nacimiento ya NO traba la reserva (es opcional).
+    assert len(r["faltan"]) == 2
+    assert not any("nacimiento" in f for f in r["faltan"])
     assert not reserva.called
     assert runtime.booked is False
 
@@ -844,3 +846,17 @@ async def test_anotar_extra_deja_la_nota_en_el_crm(rt, respx_mock):
     }
     vacio = await runtime.execute("anotar_extra", {"texto": "  "})
     assert vacio["ok"] is True and len(ruta.calls) == 1
+
+
+async def test_book_session_reserva_sin_fecha_de_nacimiento(respx_mock):
+    """DNI + obra social alcanzan: sin fecha de nacimiento igual se reserva."""
+    ctx = make_ctx()
+    conv = await ctx.store.get_or_create_conversation(IDENTITY)
+    runtime = ToolRuntime(
+        ctx, conv, CRM_CONV_ID, salud=True,
+        paciente={"documentNumber": "30111222", "birthDate": None, "insuranceId": "ins_1"},
+    )
+    try:
+        assert runtime._faltan_datos({}) is None
+    finally:
+        await ctx.crm.aclose()
