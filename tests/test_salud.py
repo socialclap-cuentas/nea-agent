@@ -830,3 +830,17 @@ async def test_sin_obra_social_solo_vale_si_dice_particular(rt, respx_mock):
         "book_session", {"start_utc": SLOT_ISO, "dia_confirmado": "sí", "sin_obra_social": "tengo Osde"}
     )
     assert r["ok"] is False and not reserva.called
+
+
+async def test_anotar_extra_deja_la_nota_en_el_crm(rt, respx_mock):
+    runtime, ctx, conv = rt
+    ruta = respx_mock.post(f"{CRM_URL}/api/bot/salud/nota").mock(
+        return_value=httpx.Response(200, json={"saved": True})
+    )
+    r = await runtime.execute("anotar_extra", {"texto": "prefiere a la mañana"})
+    assert r == {"ok": True, "anotado": True}
+    assert json.loads(ruta.calls[0].request.content) == {
+        "conversationId": CRM_CONV_ID, "text": "prefiere a la mañana"
+    }
+    vacio = await runtime.execute("anotar_extra", {"texto": "  "})
+    assert vacio["ok"] is True and len(ruta.calls) == 1

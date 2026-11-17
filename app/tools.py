@@ -374,6 +374,22 @@ SALUD_SCHEMAS: list[dict[str, Any]] = [
         },
     }},
     {"type": "function", "function": {
+        "name": "anotar_extra",
+        "description": (
+            "Deja en las notas del contacto UN dato EXTRA y administrativo que el "
+            "paciente mencionó y que no tiene otro lugar: preferencia de horario o "
+            "de contacto, quién lo acompaña, cómo prefiere pagar. NUNCA el turno "
+            "(ya queda en la agenda), ni documento/obra social (van con "
+            "guardar_paciente), ni síntomas, diagnósticos, medicación ni nada "
+            "clínico. Una frase corta; si dudas, no lo anotes."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"texto": {"type": "string", "description": "Máximo 200 caracteres"}},
+            "required": ["texto"],
+        },
+    }},
+    {"type": "function", "function": {
         "name": "guardar_paciente",
         "description": (
             "Guarda datos ADMINISTRATIVOS del paciente: documento, fecha de "
@@ -524,6 +540,7 @@ CLAVE_DE_HERRAMIENTA = {
     "lista_de_espera": "agendar",
     "registrar_encuesta": "agendar",
     "guardar_paciente": "agendar",
+    "anotar_extra": "agendar",
 }
 
 
@@ -1452,6 +1469,12 @@ class ToolRuntime:
                 else:
                     out["instrucciones"] = "agradece su respuesta; si fue baja, dile que el equipo lo va a tener en cuenta."
                 return out
+            if name == "anotar_extra":
+                texto = (_texto(args.get("texto")) or "")[:200]
+                if not texto:
+                    return {"ok": True, "nota": "nada que anotar"}
+                r = await crm.salud_nota(cid, texto)
+                return {"ok": True, "anotado": bool(r.get("saved"))}
             if name == "guardar_paciente":
                 datos: dict[str, Any] = {}
                 mapa = {

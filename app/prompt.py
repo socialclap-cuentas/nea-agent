@@ -427,6 +427,10 @@ def _salud_lines(context: dict | None, now: datetime, tz: ZoneInfo) -> list[str]
         "devuelve obra_social_no_cargada, NO la inventes: una persona confirma si la "
         "atienden). book_session RECHAZA la reserva si faltan: mientras "
         "no devuelva ok, el turno NO existe y NUNCA digas que quedó confirmado.",
+        "  · Si el paciente cuenta algo práctico que no tiene otro lugar (prefiere "
+        "la mañana, viene con su hijo, cómo quiere que lo contacten) anótalo con "
+        "anotar_extra, en una frase corta. NUNCA repitas ahí el turno ni su "
+        "documento u obra social, ni anotes síntomas, diagnósticos o medicación.",
         "  · Si pide cancelar su turno: confirma el día y la hora, pregunta «¿querés "
         "que lo cancele?» y SOLO con su sí llama cancelar_turno. Si prefiere moverlo, "
         "usa reschedule_session. Si no hay horario que le sirva, ofrécele la lista de "

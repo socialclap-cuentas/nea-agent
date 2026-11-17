@@ -537,6 +537,10 @@ class CrmClient:
     async def salud_paciente(self, conversation_id: str, datos: dict[str, Any]) -> dict[str, Any]:
         return await self._salud("PUT", "paciente", json={"conversationId": conversation_id, **datos})
 
+    async def salud_nota(self, conversation_id: str, texto: str) -> dict[str, Any]:
+        """Deja un dato EXTRA en las «Notas del contacto» (se suma, no se pisa)."""
+        return await self._salud("POST", "nota", json={"conversationId": conversation_id, "text": texto})
+
     async def post_typing(self, conversation_id: str) -> None:
         """Marca leído + "escribiendo…" (007). Best-effort: sin reintentos."""
         resp = await self._request(
