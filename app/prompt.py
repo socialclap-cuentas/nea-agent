@@ -422,7 +422,9 @@ def _salud_lines(context: dict | None, now: datetime, tz: ZoneInfo) -> list[str]
         "guardes ni repitas síntomas o diagnósticos.",
         "  · ANTES de reservar necesitas su documento (DNI) y su obra social (o que "
         "viene particular). Pídeselos cuando acepte el horario, en un solo mensaje "
-        "breve, y guárdalos. book_session RECHAZA la reserva si faltan: mientras "
+        "breve, y guárdalos con guardar_paciente (obra_social con el nombre que diga; si "
+        "devuelve obra_social_no_cargada, NO la inventes: una persona confirma si la "
+        "atienden). book_session RECHAZA la reserva si faltan: mientras "
         "no devuelva ok, el turno NO existe y NUNCA digas que quedó confirmado.",
         "  · Si pide cancelar su turno: confirma el día y la hora, pregunta «¿querés "
         "que lo cancele?» y SOLO con su sí llama cancelar_turno. Si prefiere moverlo, "

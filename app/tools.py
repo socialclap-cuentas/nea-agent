@@ -14,6 +14,8 @@ nunca tumba el turno.
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 from datetime import date, datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -385,6 +387,15 @@ SALUD_SCHEMAS: list[dict[str, Any]] = [
                 "documento": {"type": "string"},
                 "fecha_nacimiento": {"type": "string", "description": "AAAA-MM-DD"},
                 "obra_social_id": {"type": "string"},
+                "obra_social": {
+                    "type": "string",
+                    "description": (
+                        "La obra social TAL COMO la dijo el paciente (ej. «Osde»). "
+                        "Se busca en el catálogo; si el consultorio no la tiene "
+                        "cargada, la herramienta te lo dice. Prefiere esto a "
+                        "obra_social_id."
+                    ),
+                },
                 "numero_afiliado": {"type": "string"},
                 "no_enviar_seguimientos": {
                     "type": "boolean",
@@ -430,6 +441,28 @@ _SALUD_PROPS_BOOK = {
         ),
     },
 }
+
+
+
+_PARTICULAR = re.compile(r"particular|sin obra|no tengo|ningun|privad|por mi cuenta|sin prepaga", re.I)
+
+
+def _plano(texto: str) -> str:
+    """Minúsculas, sin acentos ni signos: para comparar nombres de obras sociales."""
+    base = unicodedata.normalize("NFKD", texto.lower())
+    return re.sub(r"[^a-z0-9]+", "", "".join(c for c in base if not unicodedata.combining(c)))
+
+
+def _buscar_obra_social(nombre: str, catalogo: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """La obra social del catálogo que el paciente nombró, o None si no está."""
+    buscado = _plano(nombre)
+    if not buscado:
+        return None
+    for ins in catalogo:
+        propio = _plano(str(ins.get("name") or ""))
+        if propio and (propio == buscado or propio in buscado or buscado in propio):
+            return ins
+    return None
 
 
 def hay_salud(context: dict[str, Any] | None) -> bool:
@@ -1101,7 +1134,7 @@ class ToolRuntime:
         faltan: list[str] = []
         if not self._dni_ok:
             faltan.append("documento (DNI)")
-        particular = bool(_texto(args.get("sin_obra_social")))
+        particular = bool(_PARTICULAR.search(_texto(args.get("sin_obra_social")) or ""))
         if not (self._os_ok or _texto(args.get("insurance_id")) or particular):
             faltan.append("obra social (o que viene particular)")
         if not faltan:
@@ -1428,6 +1461,31 @@ class ToolRuntime:
                     v = _texto(args.get(clave))
                     if v:
                         datos[destino] = v
+                nombre_os = _texto(args.get("obra_social"))
+                if nombre_os and "insuranceId" not in datos:
+                    catalogo = (await crm.salud_catalogo()).get("insurances") or []
+                    ins = _buscar_obra_social(nombre_os, catalogo)
+                    if ins is None or not ins.get("id"):
+                        # El documento sí se guarda; la obra social no se inventa.
+                        if "documentNumber" in datos:
+                            await crm.salud_paciente(cid, {"documentNumber": datos["documentNumber"]})
+                            self._dni_ok = True
+                        return {
+                            "ok": False,
+                            "error": "obra_social_no_cargada",
+                            "detalle": (
+                                f"«{nombre_os}» no está entre las obras sociales que "
+                                "atiende el consultorio"
+                            ),
+                            "instrucciones": (
+                                "NO reserves ni la anotes. Dile al paciente, con "
+                                "calma, que esa obra social no figura entre las que "
+                                "tenés cargadas y que una persona del consultorio le "
+                                "confirma si la atienden; ofrécele seguir como "
+                                "particular si prefiere. Si no, haz handoff."
+                            ),
+                        }
+                    datos["insuranceId"] = str(ins["id"])
                 if isinstance(args.get("no_enviar_seguimientos"), bool):
                     datos["optOutFollowups"] = args["no_enviar_seguimientos"]
                 if not datos:

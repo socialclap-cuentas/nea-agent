@@ -792,3 +792,41 @@ async def test_sena_sin_como_pagar_no_inventa_alias(rt, respx_mock):
     final = runtime.finalize_reply("texto del modelo que se descarta")
     assert "seña de $3000" in final
     assert "Una persona del equipo te pasa los datos" in final
+
+
+async def test_guardar_paciente_resuelve_obra_social_por_nombre(rt_sin_datos, respx_mock):
+    runtime, ctx, conv = rt_sin_datos
+    respx_mock.get(f"{CRM_URL}/api/bot/salud/catalog").mock(
+        return_value=httpx.Response(200, json={"insurances": [{"id": "ins_9", "name": "OSDE", "notes": None}]})
+    )
+    ruta = respx_mock.put(f"{CRM_URL}/api/bot/salud/paciente").mock(return_value=httpx.Response(200, json={}))
+    r = await runtime.execute("guardar_paciente", {"documento": "34244083", "obra_social": "Osde"})
+    assert r["ok"] is True
+    cuerpo = json.loads(ruta.calls[0].request.content)
+    assert cuerpo["insuranceId"] == "ins_9" and cuerpo["documentNumber"] == "34244083"
+
+
+async def test_obra_social_no_cargada_no_se_inventa_y_no_reserva(rt_sin_datos, respx_mock):
+    runtime, ctx, conv = rt_sin_datos
+    await _ofrecer(ctx, conv)
+    respx_mock.get(f"{CRM_URL}/api/bot/salud/catalog").mock(
+        return_value=httpx.Response(200, json={"insurances": []})
+    )
+    ruta = respx_mock.put(f"{CRM_URL}/api/bot/salud/paciente").mock(return_value=httpx.Response(200, json={}))
+    reserva = respx_mock.post(f"{CRM_URL}/api/bot/bookings")
+    r = await runtime.execute("guardar_paciente", {"documento": "34244083", "obra_social": "Osde"})
+    assert r["ok"] is False and r["error"] == "obra_social_no_cargada"
+    # el documento sí quedó guardado
+    assert json.loads(ruta.calls[0].request.content) == {"conversationId": CRM_CONV_ID, "documentNumber": "34244083"}
+    b = await runtime.execute("book_session", {"start_utc": SLOT_ISO, "dia_confirmado": "sí"})
+    assert b["ok"] is False and not reserva.called
+
+
+async def test_sin_obra_social_solo_vale_si_dice_particular(rt, respx_mock):
+    runtime, ctx, conv = rt
+    await _ofrecer(ctx, conv)
+    reserva = respx_mock.post(f"{CRM_URL}/api/bot/bookings")
+    r = await runtime.execute(
+        "book_session", {"start_utc": SLOT_ISO, "dia_confirmado": "sí", "sin_obra_social": "tengo Osde"}
+    )
+    assert r["ok"] is False and not reserva.called
