@@ -421,6 +421,14 @@ _SALUD_PROPS_BOOK = {
         "type": "string",
         "description": "La obra social del paciente (id del catálogo), si la dijo.",
     },
+    "sin_obra_social": {
+        "type": "string",
+        "description": (
+            "SOLO si el paciente dijo que viene particular (sin obra social): lo "
+            "que escribió. Si no puedes citarlo, no lo supongas: pregúntale por "
+            "su obra social."
+        ),
+    },
 }
 
 
@@ -687,11 +695,17 @@ class ToolRuntime:
         conversacion_reciente: str | None = None,
         etapas: list[str] | None = None,
         salud: bool = False,
+        paciente: dict[str, Any] | None = None,
     ) -> None:
         self._ctx = ctx
         # 070 — ¿el CRM trae el vertical salud para este turno? (bloque `salud`
         # del contexto). Sin él, ninguna de sus herramientas existe.
         self.salud = salud
+        # Qué datos administrativos del paciente ya tenemos (del contexto del
+        # CRM, o guardados en ESTE turno): book_session no reserva sin ellos.
+        pac = paciente if isinstance(paciente, dict) else {}
+        self._dni_ok = bool(_texto(pac.get("documentNumber")))
+        self._os_ok = bool(_texto(pac.get("insuranceId")))
         # 038 — A qué etapas puede mover al lead (`lead.nextStages`).
         self.etapas: list[str] = list(etapas or [])
         # Lo último que se dijo en la conversación (app/dias.py). None ⇒ no
@@ -1076,7 +1090,41 @@ class ToolRuntime:
             "slots": _slots_for_llm(fresh),
         }
 
+    def _faltan_datos(self, args: dict[str, Any]) -> dict[str, Any] | None:
+        """Sin documento y obra social (o «particular» citado) no se reserva.
+
+        El prompt lo pide, pero un modelo apurado lo saltea y el turno queda
+        sin datos: se hace cumplir acá, en código.
+        """
+        if not self.salud or getattr(self._ctx.crm, "supports_agenda_v2", False):
+            return None
+        faltan: list[str] = []
+        if not self._dni_ok:
+            faltan.append("documento (DNI)")
+        particular = bool(_texto(args.get("sin_obra_social")))
+        if not (self._os_ok or _texto(args.get("insurance_id")) or particular):
+            faltan.append("obra social (o que viene particular)")
+        if not faltan:
+            return None
+        return {
+            "ok": False,
+            "error": "faltan_datos_del_paciente",
+            "faltan": faltan,
+            "instrucciones": (
+                "TODAVÍA NO reservaste nada: no digas que el turno quedó. Pídele "
+                "al paciente, en un solo mensaje breve, lo que falta ("
+                + ", ".join(faltan)
+                + "). Con lo que conteste, guarda el documento y la obra social "
+                "con guardar_paciente y recién entonces llama book_session de "
+                "nuevo con el mismo horario. Si viene particular, pásalo en "
+                "sin_obra_social con sus palabras."
+            ),
+        }
+
     async def _book_session(self, args: dict[str, Any]) -> dict[str, Any]:
+        faltan = self._faltan_datos(args)
+        if faltan is not None:
+            return faltan
         chosen, error = await self._resolve_offered(args, "book_session")
         if error is not None or chosen is None:
             return error or {"ok": False, "error": "slot_no_ofrecido"}
@@ -1385,6 +1433,10 @@ class ToolRuntime:
                 if not datos:
                     return {"ok": True, "nota": "sin datos nuevos"}
                 await crm.salud_paciente(cid, datos)
+                if "documentNumber" in datos:
+                    self._dni_ok = True
+                if "insuranceId" in datos:
+                    self._os_ok = True
                 return {"ok": True}
         except CrmConflict as exc:
             error = exc.payload.get("error")

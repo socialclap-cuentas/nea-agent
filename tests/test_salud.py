@@ -110,9 +110,90 @@ def test_hay_salud_solo_con_el_bloque():
 async def rt():
     ctx = make_ctx()
     conv = await ctx.store.get_or_create_conversation(IDENTITY)
-    runtime = ToolRuntime(ctx, conv, CRM_CONV_ID, salud=True)
+    # Con documento ya guardado: la obra social la aporta cada prueba.
+    runtime = ToolRuntime(
+        ctx, conv, CRM_CONV_ID, salud=True, paciente={"documentNumber": "30111222"}
+    )
     yield runtime, ctx, conv
     await ctx.crm.aclose()
+
+
+@pytest.fixture
+async def rt_sin_datos():
+    ctx = make_ctx()
+    conv = await ctx.store.get_or_create_conversation(IDENTITY)
+    runtime = ToolRuntime(ctx, conv, CRM_CONV_ID, salud=True, paciente=SALUD_BLOCK["patient"])
+    yield runtime, ctx, conv
+    await ctx.crm.aclose()
+
+
+async def _ofrecer(ctx, conv):
+    await ctx.store.replace_offered_slots(
+        conv.id,
+        [
+            OfferedSlot(
+                conversation_id=conv.id,
+                start_utc=SLOT_DT,
+                end_utc=None,
+                label="jueves 10 de diciembre, 12:00",
+                professional_id="pro_a",
+                professional_name="Dra. Pérez",
+                appointment_type_id="apt_1",
+            )
+        ],
+    )
+
+
+async def test_book_session_no_reserva_sin_documento_ni_obra_social(rt_sin_datos, respx_mock):
+    runtime, ctx, conv = rt_sin_datos
+    await _ofrecer(ctx, conv)
+    reserva = respx_mock.post(f"{CRM_URL}/api/bot/bookings")
+    r = await runtime.execute(
+        "book_session", {"start_utc": SLOT_ISO, "dia_confirmado": "sí, el jueves"}
+    )
+    assert r["ok"] is False
+    assert r["error"] == "faltan_datos_del_paciente"
+    assert len(r["faltan"]) == 2
+    assert not reserva.called
+    assert runtime.booked is False
+
+
+async def test_book_session_reserva_tras_guardar_datos_en_el_mismo_turno(rt_sin_datos, respx_mock):
+    runtime, ctx, conv = rt_sin_datos
+    await _ofrecer(ctx, conv)
+    respx_mock.put(f"{CRM_URL}/api/bot/salud/paciente").mock(return_value=httpx.Response(200, json={}))
+    respx_mock.get(f"{CRM_URL}/api/bot/salud/catalog").mock(
+        return_value=httpx.Response(200, json={"rules": {}})
+    )
+    respx_mock.post(f"{CRM_URL}/api/bot/bookings").mock(
+        return_value=httpx.Response(201, json={"bookingId": "bk_1", "label": "x", "linkPending": False})
+    )
+    respx_mock.put(f"{CRM_URL}/api/bot/ficha").mock(return_value=httpx.Response(200, json={}))
+    g = await runtime.execute(
+        "guardar_paciente", {"documento": "30111222", "obra_social_id": "ins_1"}
+    )
+    assert g["ok"] is True
+    r = await runtime.execute(
+        "book_session", {"start_utc": SLOT_ISO, "dia_confirmado": "sí, el jueves"}
+    )
+    assert r["ok"] is True and runtime.booked is True
+
+
+async def test_book_session_acepta_particular_citado(rt, respx_mock):
+    runtime, ctx, conv = rt
+    await _ofrecer(ctx, conv)
+    respx_mock.get(f"{CRM_URL}/api/bot/salud/catalog").mock(
+        return_value=httpx.Response(200, json={"rules": {}})
+    )
+    respx_mock.post(f"{CRM_URL}/api/bot/bookings").mock(
+        return_value=httpx.Response(201, json={"bookingId": "bk_1", "label": "x", "linkPending": False})
+    )
+    respx_mock.put(f"{CRM_URL}/api/bot/ficha").mock(return_value=httpx.Response(200, json={}))
+    r = await runtime.execute(
+        "book_session",
+        {"start_utc": SLOT_ISO, "dia_confirmado": "sí, el jueves", "sin_obra_social": "voy particular"},
+    )
+    assert r["ok"] is True
 
 
 async def test_propose_slots_reenvia_profesional_tipo_y_obra_social(rt, respx_mock):
@@ -553,7 +634,7 @@ async def test_e2e_urgencia_se_deriva_sin_diagnosticar(ctx, client, respx_mock):
 
 
 async def test_e2e_reserva_con_profesional_tipo_y_sena(ctx, client, respx_mock):
-    routes = _rutas(respx_mock)
+    routes = _rutas(respx_mock, patient={"contactId": "ct_1", "documentNumber": "30111222", "insuranceId": None})
     respx_mock.get(f"{CRM_URL}/api/bot/salud/catalog").mock(
         return_value=httpx.Response(
             200, json={"rules": {"depositPaymentInfo": "Alias: clinica.pagos"}}
@@ -704,7 +785,9 @@ async def test_sena_sin_como_pagar_no_inventa_alias(rt, respx_mock):
         )
     )
     respx_mock.put(f"{CRM_URL}/api/bot/ficha").mock(return_value=httpx.Response(200, json={}))
-    r = await runtime.execute("book_session", {"start_utc": SLOT_ISO, "dia_confirmado": "sí"})
+    r = await runtime.execute(
+        "book_session", {"start_utc": SLOT_ISO, "dia_confirmado": "sí", "sin_obra_social": "particular"}
+    )
     assert r["ok"] is True
     final = runtime.finalize_reply("texto del modelo que se descarta")
     assert "seña de $3000" in final

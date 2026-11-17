@@ -453,6 +453,7 @@ async def run_turn(
         conversacion_reciente=_conversacion_reciente(history),
         etapas=etapas_siguientes(context),
         salud=hay_salud(context),
+        paciente=((context or {}).get("salud") or {}).get("patient"),
     )
     try:
         final_text = await _tool_loop(ctx, messages, runtime)
