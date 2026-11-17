@@ -160,8 +160,9 @@ async def test_book_session_no_reserva_sin_documento_ni_obra_social(rt_sin_datos
     assert runtime.booked is False
 
 
-async def test_book_session_reserva_tras_guardar_datos_en_el_mismo_turno(rt_sin_datos, respx_mock):
-    runtime, ctx, conv = rt_sin_datos
+async def test_book_session_reserva_tras_guardar_datos_en_el_mismo_turno(rt, respx_mock):
+    # El documento ya está en la ficha (lo completó por el enlace); falta la obra social.
+    runtime, ctx, conv = rt
     await _ofrecer(ctx, conv)
     respx_mock.put(f"{CRM_URL}/api/bot/salud/paciente").mock(return_value=httpx.Response(200, json={}))
     respx_mock.get(f"{CRM_URL}/api/bot/salud/catalog").mock(
@@ -172,7 +173,7 @@ async def test_book_session_reserva_tras_guardar_datos_en_el_mismo_turno(rt_sin_
     )
     respx_mock.put(f"{CRM_URL}/api/bot/ficha").mock(return_value=httpx.Response(200, json={}))
     g = await runtime.execute(
-        "guardar_paciente", {"documento": "30111222", "fecha_nacimiento": "1990-05-01", "obra_social_id": "ins_1"}
+        "guardar_paciente", {"fecha_nacimiento": "1990-05-01", "obra_social_id": "ins_1"}
     )
     assert g["ok"] is True
     r = await runtime.execute(
@@ -412,7 +413,6 @@ async def test_guardar_paciente_mapea_campos_y_no_llama_sin_datos(rt, respx_mock
     await runtime.execute(
         "guardar_paciente",
         {
-            "documento": "30123456",
             "fecha_nacimiento": "1990-05-17",
             "obra_social_id": "ins_1",
             "numero_afiliado": "A-99",
@@ -422,7 +422,6 @@ async def test_guardar_paciente_mapea_campos_y_no_llama_sin_datos(rt, respx_mock
     )
     assert json.loads(ruta.calls[0].request.content) == {
         "conversationId": CRM_CONV_ID,
-        "documentNumber": "30123456",
         "birthDate": "1990-05-17",
         "insuranceId": "ins_1",
         "affiliateNumber": "A-99",
@@ -802,10 +801,10 @@ async def test_guardar_paciente_resuelve_obra_social_por_nombre(rt_sin_datos, re
         return_value=httpx.Response(200, json={"insurances": [{"id": "ins_9", "name": "OSDE", "notes": None}]})
     )
     ruta = respx_mock.put(f"{CRM_URL}/api/bot/salud/paciente").mock(return_value=httpx.Response(200, json={}))
-    r = await runtime.execute("guardar_paciente", {"documento": "34244083", "obra_social": "Osde"})
+    r = await runtime.execute("guardar_paciente", {"obra_social": "Osde"})
     assert r["ok"] is True
     cuerpo = json.loads(ruta.calls[0].request.content)
-    assert cuerpo["insuranceId"] == "ins_9" and cuerpo["documentNumber"] == "34244083"
+    assert cuerpo["insuranceId"] == "ins_9" and "documentNumber" not in cuerpo
 
 
 async def test_obra_social_no_cargada_no_se_inventa_y_no_reserva(rt_sin_datos, respx_mock):
@@ -816,10 +815,9 @@ async def test_obra_social_no_cargada_no_se_inventa_y_no_reserva(rt_sin_datos, r
     )
     ruta = respx_mock.put(f"{CRM_URL}/api/bot/salud/paciente").mock(return_value=httpx.Response(200, json={}))
     reserva = respx_mock.post(f"{CRM_URL}/api/bot/bookings")
-    r = await runtime.execute("guardar_paciente", {"documento": "34244083", "obra_social": "Osde"})
+    r = await runtime.execute("guardar_paciente", {"obra_social": "Osde"})
     assert r["ok"] is False and r["error"] == "obra_social_no_cargada"
-    # el documento sí quedó guardado
-    assert json.loads(ruta.calls[0].request.content) == {"conversationId": CRM_CONV_ID, "documentNumber": "34244083"}
+    assert ruta.call_count == 0  # no se inventa ni se guarda nada
     b = await runtime.execute("book_session", {"start_utc": SLOT_ISO, "dia_confirmado": "sí"})
     assert b["ok"] is False and not reserva.called
 
@@ -860,3 +858,71 @@ async def test_book_session_reserva_sin_fecha_de_nacimiento(respx_mock):
         assert runtime._faltan_datos({}) is None
     finally:
         await ctx.crm.aclose()
+
+
+# ------------------------------------------- 071 · documento solo por enlace ---
+
+LINK = "https://crm.test/datos/" + "a" * 32
+
+
+async def test_enviar_enlace_datos_devuelve_link_y_mensaje(rt_sin_datos, respx_mock):
+    runtime, *_ = rt_sin_datos
+    ruta = respx_mock.post(f"{CRM_URL}/api/bot/salud/enlace-datos").mock(
+        return_value=httpx.Response(201, json={"url": LINK, "expiresAt": "2026-11-18T00:00:00Z"})
+    )
+    r = await runtime.execute("enviar_enlace_datos", {})
+    assert r["ok"] is True and r["url"] == LINK
+    assert LINK in r["mensaje"] and "WhatsApp no nos permite" in r["mensaje"]
+    assert json.loads(ruta.calls[0].request.content) == {"conversationId": CRM_CONV_ID}
+
+
+async def test_enviar_enlace_datos_no_se_pide_si_ya_hay_documento(rt, respx_mock):
+    runtime, *_ = rt
+    ruta = respx_mock.post(f"{CRM_URL}/api/bot/salud/enlace-datos")
+    r = await runtime.execute("enviar_enlace_datos", {})
+    assert r["ok"] is True and not ruta.called
+
+
+async def test_enviar_enlace_datos_sin_url_deriva_a_una_persona(rt_sin_datos, respx_mock):
+    runtime, *_ = rt_sin_datos
+    respx_mock.post(f"{CRM_URL}/api/bot/salud/enlace-datos").mock(return_value=httpx.Response(201, json={}))
+    r = await runtime.execute("enviar_enlace_datos", {})
+    assert r["ok"] is False and r["error"] == "sin_enlace" and "handoff" in r["instrucciones"]
+
+
+async def test_faltan_datos_manda_al_enlace_y_no_pide_dni_por_chat(rt_sin_datos, respx_mock):
+    runtime, ctx, conv = rt_sin_datos
+    await _ofrecer(ctx, conv)
+    r = await runtime.execute("book_session", {"start_utc": SLOT_ISO, "dia_confirmado": "sí, el jueves"})
+    assert r["error"] == "faltan_datos_del_paciente"
+    assert "enviar_enlace_datos" in r["instrucciones"] and "NO se pide por el chat" in r["instrucciones"]
+
+
+async def test_dni_escrito_en_el_chat_no_se_guarda(rt_sin_datos, respx_mock):
+    runtime, *_ = rt_sin_datos
+    ruta = respx_mock.put(f"{CRM_URL}/api/bot/salud/paciente").mock(return_value=httpx.Response(200, json={}))
+    r = await runtime.execute("guardar_paciente", {"documento": "34244083"})
+    assert r["ok"] is False and r["error"] == "documento_solo_por_enlace"
+    assert "enviar_enlace_datos" in r["instrucciones"]
+    assert not ruta.called
+    assert runtime._dni_ok is False
+
+
+async def test_dni_junto_a_otros_datos_guarda_lo_demas_y_descarta_el_dni(rt_sin_datos, respx_mock):
+    runtime, *_ = rt_sin_datos
+    ruta = respx_mock.put(f"{CRM_URL}/api/bot/salud/paciente").mock(return_value=httpx.Response(200, json={}))
+    r = await runtime.execute(
+        "guardar_paciente", {"documento": "34244083", "fecha_nacimiento": "1990-05-01"}
+    )
+    assert r["ok"] is True and r["documento_descartado"] is True
+    cuerpo = json.loads(ruta.calls[0].request.content)
+    assert "documentNumber" not in cuerpo and cuerpo["birthDate"] == "1990-05-01"
+    assert runtime._dni_ok is False
+
+
+def test_el_esquema_de_guardar_paciente_ya_no_acepta_documento():
+    from app.tools import SALUD_SCHEMAS
+
+    gp = next(t for t in SALUD_SCHEMAS if t["function"]["name"] == "guardar_paciente")
+    assert "documento" not in gp["function"]["parameters"]["properties"]
+    assert "enviar_enlace_datos" in {t["function"]["name"] for t in SALUD_SCHEMAS}

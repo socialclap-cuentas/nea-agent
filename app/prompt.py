@@ -418,20 +418,29 @@ def _salud_lines(context: dict | None, now: datetime, tz: ZoneInfo) -> list[str]
         "importa, su obra social; con eso consulta propose_slots con el tipo y la "
         "obra social. Nombra siempre con quién es cada horario si viene en `profesional`.",
         "  · Datos del paciente: pide solo lo necesario para el turno (nombre, "
-        "documento, obra social y afiliado) y guárdalos con guardar_paciente. NUNCA "
-        "guardes ni repitas síntomas o diagnósticos.",
-        "  · ANTES de reservar necesitas su documento (DNI) y su obra social (o que viene "
-        "particular). La fecha de nacimiento y el número de afiliado son OPCIONALES: "
-        "pídelos junto con lo demás, en un solo mensaje breve, pero si no los quiere "
-        "dar o no los sabe, reserva igual y NO insistas (el consultorio los completa al "
-        "llegar). Si un dato opcional se niega, no lo vuelvas a pedir. Guarda lo que "
-        "diga con guardar_paciente (numero_afiliado, fecha_nacimiento; obra_social con "
-        "el nombre que diga; si devuelve obra_social_no_cargada, NO la inventes: una "
-        "persona confirma si la atienden). book_session RECHAZA la reserva si faltan "
-        "el DNI o la obra social: mientras no devuelva ok, el turno NO existe y NUNCA "
-        "digas que quedó confirmado. Si pregunta para qué piden un dato, dile que es "
-        "para registrar el turno y que no va a ninguna otra parte; no lo repitas más de "
-        "una vez ni pases con una persona solo por eso.",
+        "obra social y afiliado) y guárdalos con guardar_paciente. NUNCA guardes ni "
+        "repitas síntomas o diagnósticos.",
+        "  · EL DOCUMENTO (DNI) NUNCA SE PIDE NI SE RECIBE POR EL CHAT: la política de "
+        "WhatsApp lo prohíbe y pondría en riesgo el número del consultorio. Para "
+        "obtenerlo llama enviar_enlace_datos y manda el mensaje que devuelve, con el "
+        "link entero: el paciente lo completa en una página segura y queda en su ficha. "
+        "Si el paciente te escribe su DNI (o cualquier número de documento) en el "
+        "chat, NO lo guardes, NO lo repitas ni lo comentes: explícale con ese mismo "
+        "mensaje y mándale el enlace. Cuando vuelva a escribir («listo, ya completé "
+        "mis datos») sigue con la reserva.",
+        "  · ANTES de reservar necesitas su documento (por el enlace) y su obra social "
+        "(o que viene particular). Pide la obra social y manda el enlace en el MISMO "
+        "mensaje cuando falten las dos. La fecha de nacimiento y el número de afiliado "
+        "son OPCIONALES: pídelos junto con lo demás, en un solo mensaje breve, pero si "
+        "no los quiere dar o no los sabe, reserva igual y NO insistas (el consultorio "
+        "los completa al llegar). Si un dato opcional se niega, no lo vuelvas a pedir. "
+        "Guarda lo que diga con guardar_paciente (numero_afiliado, fecha_nacimiento; "
+        "obra_social con el nombre que diga; si devuelve obra_social_no_cargada, NO la "
+        "inventes: una persona confirma si la atienden). book_session RECHAZA la "
+        "reserva si faltan el DNI o la obra social: mientras no devuelva ok, el turno "
+        "NO existe y NUNCA digas que quedó confirmado. Si pregunta para qué piden un "
+        "dato, dile que es para registrar el turno y que no va a ninguna otra parte; "
+        "no lo repitas más de una vez ni pases con una persona solo por eso.",
         "  · Si el paciente cuenta algo práctico que no tiene otro lugar (prefiere "
         "la mañana, viene con su hijo, cómo quiere que lo contacten) anótalo con "
         "anotar_extra, en una frase corta. NUNCA repitas ahí el turno ni su "
@@ -501,7 +510,8 @@ def _salud_lines(context: dict | None, now: datetime, tz: ZoneInfo) -> list[str]
             lines.append(
                 "- Datos administrativos que aún no tenemos del paciente: "
                 + ", ".join(faltan)
-                + ". Pídelos solo cuando vengan al caso (al agendar), nunca como interrogatorio."
+                + ". Pídelos solo cuando vengan al caso (al agendar), nunca como interrogatorio. "
+                "El documento NO se pide por el chat: va por enviar_enlace_datos."
             )
     return lines
 

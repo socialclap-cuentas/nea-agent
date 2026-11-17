@@ -537,6 +537,11 @@ class CrmClient:
     async def salud_paciente(self, conversation_id: str, datos: dict[str, Any]) -> dict[str, Any]:
         return await self._salud("PUT", "paciente", json={"conversationId": conversation_id, **datos})
 
+    async def salud_enlace_datos(self, conversation_id: str) -> dict[str, Any]:
+        """Pide un enlace de un solo uso (24 h) para que el paciente complete su
+        documento FUERA del chat: WhatsApp prohíbe pedirlo por mensaje."""
+        return await self._salud("POST", "enlace-datos", json={"conversationId": conversation_id})
+
     async def salud_nota(self, conversation_id: str, texto: str) -> dict[str, Any]:
         """Deja un dato EXTRA en las «Notas del contacto» (se suma, no se pisa)."""
         return await self._salud("POST", "nota", json={"conversationId": conversation_id, "text": texto})

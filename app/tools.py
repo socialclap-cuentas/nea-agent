@@ -390,17 +390,28 @@ SALUD_SCHEMAS: list[dict[str, Any]] = [
         },
     }},
     {"type": "function", "function": {
+        "name": "enviar_enlace_datos",
+        "description": (
+            "Genera el enlace para que el paciente complete su DOCUMENTO (DNI) en una "
+            "página segura, FUERA de WhatsApp (la política de WhatsApp prohíbe pedir "
+            "números de documento por el chat). Úsala cuando falte el documento, o si "
+            "el paciente te escribe su DNI en el chat. Devuelve el link y el mensaje a "
+            "mandar. Sin parámetros."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    }},
+    {"type": "function", "function": {
         "name": "guardar_paciente",
         "description": (
-            "Guarda datos ADMINISTRATIVOS del paciente: documento, fecha de "
-            "nacimiento (AAAA-MM-DD), obra social (id del catálogo) y número de "
-            "afiliado. NUNCA síntomas, diagnósticos ni nada clínico. Úsala solo "
-            "con lo que el paciente te dio; no pidas datos de más."
+            "Guarda datos ADMINISTRATIVOS del paciente: fecha de nacimiento "
+            "(AAAA-MM-DD), obra social (id del catálogo o su nombre) y número de "
+            "afiliado. El DOCUMENTO no se guarda por acá ni se pide por el chat: va "
+            "por enviar_enlace_datos. NUNCA síntomas, diagnósticos ni nada clínico. "
+            "Úsala solo con lo que el paciente te dio; no pidas datos de más."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "documento": {"type": "string"},
                 "fecha_nacimiento": {"type": "string", "description": "AAAA-MM-DD"},
                 "obra_social_id": {"type": "string"},
                 "obra_social": {
@@ -540,6 +551,7 @@ CLAVE_DE_HERRAMIENTA = {
     "lista_de_espera": "agendar",
     "registrar_encuesta": "agendar",
     "guardar_paciente": "agendar",
+    "enviar_enlace_datos": "agendar",
     "anotar_extra": "agendar",
 }
 
@@ -730,6 +742,34 @@ def _slots_for_llm(slots: list[OfferedSlot]) -> list[dict[str, str]]:
             item["professional_id"] = s.professional_id
         out.append(item)
     return out
+
+
+ENLACE_MENSAJE = (
+    "Gracias. Por seguridad, WhatsApp no nos permite recibir el DNI por este chat. "
+    "Completalo en este link, te lleva 30 segundos y queda guardado en tu ficha: {url}\n"
+    "Cuando termines, volvé acá y te confirmo el turno."
+)
+
+
+def _instrucciones_faltan(faltan: list[str]) -> str:
+    """Qué hacer cuando falta algo para reservar. El documento NUNCA se pide por
+    el chat (política de WhatsApp): va por el enlace."""
+    partes = [
+        "TODAVÍA NO reservaste nada: no digas que el turno quedó."
+    ]
+    if any(f.startswith("documento") for f in faltan):
+        partes.append(
+            "El documento (DNI) NO se pide por el chat: llama enviar_enlace_datos y "
+            "mándale el link con el mensaje que te devuelve. Cuando el paciente vuelva "
+            "a escribir, llama book_session de nuevo con el mismo horario."
+        )
+    if any(f.startswith("obra social") for f in faltan):
+        partes.append(
+            "Pregúntale la obra social (o si viene particular) en un solo mensaje breve "
+            "y guárdala con guardar_paciente (obra_social con sus palabras). Si viene "
+            "particular, pásalo en sin_obra_social."
+        )
+    return " ".join(partes)
 
 
 class ToolRuntime:
@@ -1164,15 +1204,7 @@ class ToolRuntime:
             "ok": False,
             "error": "faltan_datos_del_paciente",
             "faltan": faltan,
-            "instrucciones": (
-                "TODAVÍA NO reservaste nada: no digas que el turno quedó. Pídele "
-                "al paciente, en un solo mensaje breve, lo que falta ("
-                + ", ".join(faltan)
-                + "). Con lo que conteste, guarda el documento y la obra social "
-                "con guardar_paciente y recién entonces llama book_session de "
-                "nuevo con el mismo horario. Si viene particular, pásalo en "
-                "sin_obra_social con sus palabras."
-            ),
+            "instrucciones": _instrucciones_faltan(faltan),
         }
 
     async def _book_session(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -1476,10 +1508,33 @@ class ToolRuntime:
                     return {"ok": True, "nota": "nada que anotar"}
                 r = await crm.salud_nota(cid, texto)
                 return {"ok": True, "anotado": bool(r.get("saved"))}
+            if name == "enviar_enlace_datos":
+                if self._dni_ok:
+                    return {"ok": True, "nota": "ya tenemos su documento; no hace falta pedirlo"}
+                r = await crm.salud_enlace_datos(cid)
+                url = _texto(r.get("url"))
+                if not url:
+                    return {
+                        "ok": False,
+                        "error": "sin_enlace",
+                        "instrucciones": "No pudiste generar el enlace: haz handoff para que una persona tome el documento.",
+                    }
+                return {
+                    "ok": True,
+                    "url": url,
+                    "mensaje": ENLACE_MENSAJE.format(url=url),
+                    "instrucciones": (
+                        "Manda el campo `mensaje` casi tal cual (con el link entero, "
+                        "sin acortarlo ni cambiarlo). No pidas ni repitas ningún "
+                        "número de documento por el chat."
+                    ),
+                }
             if name == "guardar_paciente":
+                # El documento NO se guarda desde el chat (política de WhatsApp):
+                # si el modelo lo manda igual, se descarta y se lo encamina al enlace.
+                documento_en_chat = bool(_texto(args.pop("documento", None)))
                 datos: dict[str, Any] = {}
                 mapa = {
-                    "documento": "documentNumber",
                     "fecha_nacimiento": "birthDate",
                     "obra_social_id": "insuranceId",
                     "numero_afiliado": "affiliateNumber",
@@ -1493,10 +1548,6 @@ class ToolRuntime:
                     catalogo = (await crm.salud_catalogo()).get("insurances") or []
                     ins = _buscar_obra_social(nombre_os, catalogo)
                     if ins is None or not ins.get("id"):
-                        # El documento sí se guarda; la obra social no se inventa.
-                        if "documentNumber" in datos:
-                            await crm.salud_paciente(cid, {"documentNumber": datos["documentNumber"]})
-                            self._dni_ok = True
                         return {
                             "ok": False,
                             "error": "obra_social_no_cargada",
@@ -1515,16 +1566,24 @@ class ToolRuntime:
                     datos["insuranceId"] = str(ins["id"])
                 if isinstance(args.get("no_enviar_seguimientos"), bool):
                     datos["optOutFollowups"] = args["no_enviar_seguimientos"]
+                aviso_doc = {
+                    "documento_descartado": True,
+                    "instrucciones": (
+                        "El DNI que el paciente escribió en el chat NO se guardó ni lo "
+                        "repitas. Llama enviar_enlace_datos y mándale el link para que "
+                        "lo complete ahí."
+                    ),
+                }
                 if not datos:
+                    if documento_en_chat:
+                        return {"ok": False, "error": "documento_solo_por_enlace", **aviso_doc}
                     return {"ok": True, "nota": "sin datos nuevos"}
                 await crm.salud_paciente(cid, datos)
-                if "documentNumber" in datos:
-                    self._dni_ok = True
                 if "insuranceId" in datos:
                     self._os_ok = True
                 if "birthDate" in datos:
                     self._nac_ok = True
-                return {"ok": True}
+                return {"ok": True, **(aviso_doc if documento_en_chat else {})}
         except CrmConflict as exc:
             error = exc.payload.get("error")
             detalle = error.get("message") if isinstance(error, dict) else None
