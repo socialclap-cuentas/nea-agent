@@ -122,6 +122,10 @@ class OpenAiLlm:
         self._reasoning_effort = reasoning_effort.strip()
         self._provider_sort = provider_sort.strip()
         self._extras_ok = True
+        # Modelos de razonamiento de OpenAI (gpt-5.x): con herramientas, el
+        # chat/completions exige `reasoning_effort="none"`. Se activa solo
+        # cuando el proveedor lo pide, nunca de entrada.
+        self._sin_razonar = False
         # Con proveedor propio (OpenRouter y compañía) no hay endpoint de
         # transcripción: el audio se manda DENTRO del chat, a un modelo que
         # sepa oír. Se decide aquí y no en cada llamada para que el camino sea
@@ -260,9 +264,18 @@ class OpenAiLlm:
         Es pegajoso a proposito -el soporte del modelo no cambia a media vida
         del proceso- y por organizacion, porque cada una tiene el suyo.
         """
+        texto = str(exc).lower()
+        if "reasoning_effort" in texto and "'none'" in texto:
+            if not self._sin_razonar:
+                self._sin_razonar = True
+                logger.warning(
+                    "llm: %s pide reasoning_effort=none para usar herramientas "
+                    "- se manda así y se reintenta",
+                    self._model,
+                )
+            return
         if not self._extras_ok:
             return
-        texto = str(exc).lower()
         if "reasoning" in texto or "provider" in texto:
             self._extras_ok = False
             logger.warning(
@@ -286,6 +299,8 @@ class OpenAiLlm:
                 extra = self._extras()
                 if extra:
                     kwargs["extra_body"] = extra
+                if self._sin_razonar:
+                    kwargs["reasoning_effort"] = "none"
                 resp = await self._client.chat.completions.create(
                     model=self._model, messages=messages, **kwargs
                 )
