@@ -739,6 +739,7 @@ class ToolRuntime:
         pac = paciente if isinstance(paciente, dict) else {}
         self._dni_ok = bool(_texto(pac.get("documentNumber")))
         self._os_ok = bool(_texto(pac.get("insuranceId")))
+        self._nac_ok = bool(_texto(pac.get("birthDate")))
         # 038 — A qué etapas puede mover al lead (`lead.nextStages`).
         self.etapas: list[str] = list(etapas or [])
         # Lo último que se dijo en la conversación (app/dias.py). None ⇒ no
@@ -1134,6 +1135,8 @@ class ToolRuntime:
         faltan: list[str] = []
         if not self._dni_ok:
             faltan.append("documento (DNI)")
+        if not self._nac_ok:
+            faltan.append("fecha de nacimiento")
         particular = bool(_PARTICULAR.search(_texto(args.get("sin_obra_social")) or ""))
         if not (self._os_ok or _texto(args.get("insurance_id")) or particular):
             faltan.append("obra social (o que viene particular)")
@@ -1495,6 +1498,8 @@ class ToolRuntime:
                     self._dni_ok = True
                 if "insuranceId" in datos:
                     self._os_ok = True
+                if "birthDate" in datos:
+                    self._nac_ok = True
                 return {"ok": True}
         except CrmConflict as exc:
             error = exc.payload.get("error")

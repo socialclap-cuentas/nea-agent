@@ -112,7 +112,7 @@ async def rt():
     conv = await ctx.store.get_or_create_conversation(IDENTITY)
     # Con documento ya guardado: la obra social la aporta cada prueba.
     runtime = ToolRuntime(
-        ctx, conv, CRM_CONV_ID, salud=True, paciente={"documentNumber": "30111222"}
+        ctx, conv, CRM_CONV_ID, salud=True, paciente={"documentNumber": "30111222", "birthDate": "1990-05-01"}
     )
     yield runtime, ctx, conv
     await ctx.crm.aclose()
@@ -153,7 +153,7 @@ async def test_book_session_no_reserva_sin_documento_ni_obra_social(rt_sin_datos
     )
     assert r["ok"] is False
     assert r["error"] == "faltan_datos_del_paciente"
-    assert len(r["faltan"]) == 2
+    assert len(r["faltan"]) == 3
     assert not reserva.called
     assert runtime.booked is False
 
@@ -170,7 +170,7 @@ async def test_book_session_reserva_tras_guardar_datos_en_el_mismo_turno(rt_sin_
     )
     respx_mock.put(f"{CRM_URL}/api/bot/ficha").mock(return_value=httpx.Response(200, json={}))
     g = await runtime.execute(
-        "guardar_paciente", {"documento": "30111222", "obra_social_id": "ins_1"}
+        "guardar_paciente", {"documento": "30111222", "fecha_nacimiento": "1990-05-01", "obra_social_id": "ins_1"}
     )
     assert g["ok"] is True
     r = await runtime.execute(
@@ -634,7 +634,7 @@ async def test_e2e_urgencia_se_deriva_sin_diagnosticar(ctx, client, respx_mock):
 
 
 async def test_e2e_reserva_con_profesional_tipo_y_sena(ctx, client, respx_mock):
-    routes = _rutas(respx_mock, patient={"contactId": "ct_1", "documentNumber": "30111222", "insuranceId": None})
+    routes = _rutas(respx_mock, patient={"contactId": "ct_1", "documentNumber": "30111222", "birthDate": "1990-05-01", "insuranceId": None})
     respx_mock.get(f"{CRM_URL}/api/bot/salud/catalog").mock(
         return_value=httpx.Response(
             200, json={"rules": {"depositPaymentInfo": "Alias: clinica.pagos"}}

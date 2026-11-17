@@ -420,8 +420,9 @@ def _salud_lines(context: dict | None, now: datetime, tz: ZoneInfo) -> list[str]
         "  · Datos del paciente: pide solo lo necesario para el turno (nombre, "
         "documento, obra social y afiliado) y guárdalos con guardar_paciente. NUNCA "
         "guardes ni repitas síntomas o diagnósticos.",
-        "  · ANTES de reservar necesitas su documento (DNI) y su obra social (o que "
-        "viene particular). Pídeselos cuando acepte el horario, en un solo mensaje "
+        "  · ANTES de reservar necesitas su documento (DNI), su fecha de nacimiento y su "
+        "obra social (o que viene particular); si tiene obra social, pide también su "
+        "número de afiliado (guárdalo como numero_afiliado, sin trabar el turno si no lo sabe). Pídeselos cuando acepte el horario, en un solo mensaje "
         "breve, y guárdalos con guardar_paciente (obra_social con el nombre que diga; si "
         "devuelve obra_social_no_cargada, NO la inventes: una persona confirma si la "
         "atienden). book_session RECHAZA la reserva si faltan: mientras "
