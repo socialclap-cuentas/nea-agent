@@ -147,6 +147,9 @@ def test_prompt_reconoce_registro_de_la_landing():
     assert "Ficha actual del lead" in system and "Odontología" in system
     assert "ya se registró en la web" in system
     assert "no le pidas de nuevo" in system
+    assert "Leandro la va a contactar" in system
+    assert "https://turnomaster.app/propuesta" in system
+    assert "NO aplican" in system
 
 
 def test_prompt_sin_registro_no_agrega_la_indicacion():

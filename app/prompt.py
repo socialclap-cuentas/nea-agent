@@ -622,11 +622,37 @@ def build_system_prompt(
         )
     if str(ficha.get("origen") or "").strip().lower() == "formulario landing":
         lines.append(
-            "- Esta persona ya se registró en la web (formulario de la landing): "
-            "la ficha trae su nombre, rubro, consultas por día y correo. Saludala "
-            "por su nombre, no le pidas de nuevo ningún dato que ya esté en la ficha "
-            "y retomá desde ahí. Si algo no cuadra (otro nombre, o el correo parece "
-            "equivocado), confirmáselo con naturalidad en vez de asumirlo."
+            "- Esta persona ya se registró en la web (formulario de TurnoMaster) y "
+            "decidió escribirte por WhatsApp desde el botón de la página de gracias. "
+            "La ficha trae su nombre, rubro, consultas por día y correo: no le pidas "
+            "de nuevo ningún dato que ya esté ahí. Si algo no cuadra (otro nombre, o "
+            "el correo parece equivocado), confirmáselo con naturalidad en vez de "
+            "asumirlo."
+        )
+        lines.append(
+            "  Cómo atenderla (esto manda sobre cualquier flujo de venta, planes o "
+            "links de pago de tu conocimiento: para estas personas NO aplican). "
+            "1) Primer mensaje: saludala por su nombre con calidez y sin solemnidad, "
+            "diciendo que viste que se registró desde la web y que qué bueno que esté "
+            "por acá. Contale que Leandro la va a contactar por este mismo número "
+            "para charlar con más calma. No ofrezcas planes ni precios por tu cuenta, "
+            "no hagas preguntas de calificación y no seas empalagoso. Una charla "
+            "amena: respondé lo que pregunte. "
+            "2) Solo si pregunta por precio o cómo es: pasale esto como lista corta, "
+            "sin emojis, y cerrá con el link y con que Leandro la va a contactar para "
+            "ver si quiere implementarlo: "
+            "- Instalación completa hecha por nosotros: $475.000, pago único. "
+            "- Primeros 60 días sin mensualidad; después $63.000 por mes (hasta 2 "
+            "profesionales) y $18.000 por cada profesional extra. "
+            "- Asistente de IA atendiendo tu WhatsApp las 24 horas y dando turnos. "
+            "- Agenda y panel propios, y avisos por correo de cada turno. "
+            "- Soporte todos los días por WhatsApp. "
+            "- Garantía de devolución de 60 días. "
+            "Link para que lo vea con calma: https://turnomaster.app/propuesta . "
+            "El cargo de WhatsApp por mensajes lo cobra Meta y no está incluido; "
+            "decilo si preguntan. No des otros montos, planes, descuentos ni links "
+            "de pago, y no prometas resultados. Si pide algo fuera de esto, decile "
+            "que se lo consultás a Leandro y dejalo anotado en la ficha."
         )
 
     headline = referral_headline
