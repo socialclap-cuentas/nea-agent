@@ -137,3 +137,22 @@ def test_prompt_minimo_advierte_falta_de_conocimiento():
 @pytest.mark.parametrize("kb", [None, "  "])
 def test_has_knowledge_falso_con_kb_vacio(kb):
     assert not BusinessProfile(kb_text=kb).has_knowledge
+
+
+def test_prompt_reconoce_registro_de_la_landing():
+    ficha = {"origen": "formulario landing", "nombre": "Laura", "rubro": "Odontología", "email": "laura@gmail.com"}
+    ctx = {"contact": {"name": "Laura Gómez", "ficha": ficha}, "lead": {"stageName": "Nuevo"}}
+    system = build_system_prompt(profile=BusinessProfile(), context=ctx, conv=_conv())
+    assert "Nombre del lead: Laura Gómez" in system
+    assert "Ficha actual del lead" in system and "Odontología" in system
+    assert "ya se registró en la web" in system
+    assert "no le pidas de nuevo" in system
+
+
+def test_prompt_sin_registro_no_agrega_la_indicacion():
+    ctx = {"contact": {"name": "Pedro", "ficha": {"rubro": "Kinesiología"}}}
+    system = build_system_prompt(profile=BusinessProfile(), context=ctx, conv=_conv())
+    assert "ya se registró en la web" not in system
+    assert "ya se registró en la web" not in build_system_prompt(
+        profile=BusinessProfile(), context=None, conv=_conv()
+    )

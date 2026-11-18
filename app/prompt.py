@@ -194,6 +194,14 @@ def build_system_prompt(
         lines.append(
             "- Ficha actual del lead: " + json.dumps(filled, ensure_ascii=False)
         )
+    if str(ficha.get("origen") or "").strip().lower() == "formulario landing":
+        lines.append(
+            "- Esta persona ya se registró en la web (formulario de la landing): "
+            "la ficha trae su nombre, rubro, consultas por día y correo. Saludala "
+            "por su nombre, no le pidas de nuevo ningún dato que ya esté en la ficha "
+            "y retomá desde ahí. Si algo no cuadra (otro nombre, o el correo parece "
+            "equivocado), confirmáselo con naturalidad en vez de asumirlo."
+        )
 
     headline = referral_headline
     if not headline:
